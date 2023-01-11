@@ -37,7 +37,6 @@ def unique(list1):
 
 # function to get all the lot numbers
 def get_lot_numbers(text):
-    
     # remove parenthesis from text
     txt = text.replace('(','').replace(')','')
     # split the text
@@ -84,6 +83,19 @@ def read_wd_table(setID, file):
     #print('cleaned up wd data in {0} and it took about {1} seconds'.format(file, str(end - start)))
     return ndf
 
+def combine_wd_table(setID):
+    files = list_files(os.path.join(wdpath, 'Set001'))
+    files = [file for file in files if '~$' not in file]
+    frames = []
+    for file in files:
+        datafile = os.path.join(wdpath, setID, file)
+        xl = pd.ExcelFile(datafile)
+        wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
+        frames.append(wd_dt)
+    wd_df = pd.concat(frames, ignore_index=True)
+    wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1)  
+    return wd_df
+
 # function to read taxlot data
 def read_taxlot(year):
     txfilepath = os.path.join(txpath, 'Taxlots' + str(year) + '.gdb')
@@ -101,3 +113,16 @@ def merge_data(setID, file, year):
                                                     how='left')
     #print('got merged data between wd and taxlot')
     return merged
+
+def make_notes(text):
+    r = re.search('ROW', text)
+    p = re.search('partial', text)
+    res = None
+    if r and p:
+        res = 'ROW & partial'
+    elif r:
+        res = 'ROW'
+    elif p:
+        res = 'partial' 
+    return res
+    
