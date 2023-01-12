@@ -13,6 +13,9 @@ import datetime
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 wdpath = inpath + '\\DSL data originals'
 txpath = inpath + '\\GIS\ORMAP_data\ORMAP_Taxlot_Years'
+yearstart = 2017
+yearend = 2023
+outfolder = 'test'
 
 # create a spreadsheet to create a dictionary
 cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
@@ -56,15 +59,17 @@ def check_duplicates(v):
     itemlist = [item for item, count in collections.Counter(v).items() if count > 1]
     return itemlist, len(itemlist)
 
-# function to clean up wd data
+# read wd tables
 def read_wd_table(setID, file):
-    start = time.time()
     datafile = os.path.join(wdpath, setID, file)
     xl = pd.ExcelFile(datafile)
     wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
+    # this will show the records in the original single table and the ID will be updated when the tables are combined
     wd_dt.loc[:, 'record_ID'] = range(1, wd_dt.shape[0] + 1)
+    return wd_dt
+
+def reindex_data(wd_dt):
     # get a list of lot numbers in each parcel id record
-    wd_dt = wd_dt[wd_dt.parcel_id.astype(str) != 'nan']
     wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(x))
     # repeat the rows based on the number of lot numbers
     ndf = wd_dt.reindex(wd_dt.index.repeat(wd_dt.lots.str.len()))
@@ -74,17 +79,40 @@ def read_wd_table(setID, file):
     ndf.loc[:, 'cnt_code'] = ndf.county.map(cnt_dict)
     # get OR taxlot IDs for wd data
     ndf.loc[:, 'ORTaxlot'] = ndf[['cnt_code', 'trsqq', 'lot']].apply(lambda row: str(row.cnt_code).zfill(2) + row.trsqq[0:2] + '.00' + row.trsqq[2:5] + '.00'+ row.trsqq[5:8] + '{:0<10}'.format(row.trsqq)[8] + '{:0<10}'.format(row.trsqq)[9] + '--' + ('000000000' + row.lot)[-9:], axis = 1)
+    return ndf
+
+# function to clean up wd data
+def clean_wd_table(setID, file):
+    start = time.time()
+    wd_dt = read_wd_table(setID, file)
+    # this will help identify problematic records with numbers
+    wd_dt = wd_dt[wd_dt.parcel_id.astype(str) != 'nan']
+    wd_dt.loc[:, 'notes'] = wd_dt.parcel_id.apply(lambda x: make_notes(x))
+    ndf = reindex_data(wd_dt)
     # get year from the receive date
     ndf.loc[:, 'year'] = ndf.received_date.apply(lambda x: x.year)
     # get year from the wd ID 
-    ndf.loc[:, 'IDyear'] = ndf.wetdet_delin_number.apply(lambda x: x[2:6])
-    
+    ndf.loc[:, 'IDyear'] = ndf.wetdet_delin_number.apply(lambda x: x[2:6]) 
     end = time.time()
-    #print('cleaned up wd data in {0} and it took about {1} seconds'.format(file, str(end - start)))
+    #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return ndf
 
+def without_lots(text):
+    if any(c.isdigit() for c in text):
+        nms = re.findall(r'\d+', text)
+        if all([any([x in text for x in [nm+'st', nm+'nd', nm+'rd', nm+'th',
+                                                  nm+' st', nm+' th', nm+' nd', nm+' rd']]) for nm in nms]):
+            res = 'Y'
+        else:
+            res = 'N'
+    else:
+        res = 'Y'
+    return res
+
+# combine all the wd tables in the set to review unique records
 def combine_wd_table(setID):
-    files = list_files(os.path.join(wdpath, 'Set001'))
+    files = list_files(os.path.join(wdpath, setID))
+    # in case there are unidentified files
     files = [file for file in files if '~$' not in file]
     frames = []
     for file in files:
@@ -93,36 +121,154 @@ def combine_wd_table(setID):
         wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
         frames.append(wd_dt)
     wd_df = pd.concat(frames, ignore_index=True)
-    wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1)  
+    # this creates unique IDs for all the records in the same set
+    wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1)
+    selectedID = wd_df.parcel_id.astype(str) != 'nan'
+    wd_df.loc[selectedID, 'missinglot'] = wd_df[selectedID].parcel_id.apply(lambda x: without_lots(x))
     return wd_df
 
 # function to read taxlot data
-def read_taxlot(year):
+def read_taxlot(year, mute=True):
     txfilepath = os.path.join(txpath, 'Taxlots' + str(year) + '.gdb')
     start = time.time()
     tx_dt = gpd.read_file(txfilepath, layer='TL_Dissolv')
     end = time.time()
-    #print('got taxlot data in {0} and it took about {1} minutes'.format(str(year), str(round((end - start)/60, 0))))
+    if not mute:
+        print(f'got taxlot data in {year} and it took about {str(round((end - start)/60, 0))} minutes')
     return tx_dt
 
+# merge wd table with taxlot polygons
 def merge_data(setID, file, year):
-    wd_dt = read_wd_table(setID, file)
+    wd_dt = clean_wd_table(setID, file)
     tx_dt = read_taxlot(year)
     merged = wd_dt[wd_dt.IDyear == str(year)].merge(tx_dt[['ORTaxlot', 'geometry']], 
                                                     on='ORTaxlot', 
-                                                    how='left')
+                                                    how='left')  # to include all the records in the original table, using "left"
     #print('got merged data between wd and taxlot')
     return merged
 
+# add notes to the wd records
 def make_notes(text):
     r = re.search('ROW', text)
-    p = re.search('partial', text)
+    p = re.search('partial|part|p', text)
+    m = re.search('Many|MANY|multiple|many', text)
     res = None
-    if r and p:
+    if r and p and m:
+        res = 'ROW & partial & many'
+    elif r and p:
         res = 'ROW & partial'
+    elif r and m:
+        res = 'ROW & many'
+    elif p and m:
+        res = 'partial & many'
     elif r:
         res = 'ROW'
     elif p:
-        res = 'partial' 
+        res = 'partial'
+    elif m:
+        res = 'many'    
     return res
+
+# get a county and record in a dictionary
+def get_record_dict(setID):
+    # read all set001 data without merging
+    wd_df = combine_wd_table(setID)
+    selectedID = wd_df.parcel_id.astype(str) != 'nan'
+    wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
+    counties = wd_df.county.unique()
+    count_records = []
+    for cnty in counties:
+        count = len(wd_df[wd_df.county == cnty])
+        count_records.append(count)
+    record_df = pd.DataFrame({'county': counties, 'rcount':count_records})
+    record_df['cum_count'] = record_df[['rcount']].cumsum(axis = 0, skipna = True).rcount.values
+    record_dict = dict(zip(record_df.county[1:len(counties)], record_df.cum_count[0:(len(counties)-1)]))
+    return counties, record_dict
+
+# merge data by year and combine all tables in the same set
+def combine_merged_data(setID, export=False):
+    files = list_files(os.path.join(wdpath, setID))
+    files = [file for file in files if '~$' not in file]
+    start1 = time.time()
+    frames = []
+    # need to change the year start and end when they are changed
+    for year in range(yearstart, yearend):
+        tx_dt = read_taxlot(year)
+        for file in files:
+            wd_dt = clean_wd_table(setID, file = file)  
+            df = wd_dt[wd_dt.IDyear == str(year)].merge(tx_dt[['ORTaxlot', 'geometry']], 
+                                                        on='ORTaxlot')
+            frames.append(df)
+    df = pd.concat(frames, ignore_index=True)      
+    end1 = time.time()
+    print(f'it took {round((end1 - start1)/60, 0)} minutes to complete {setID}')
+    df['response_date'] = df['response_date'].dt.strftime("%Y-%m-%d")
+    df['received_date'] = df['received_date'].dt.strftime("%Y-%m-%d")
+    df['lots'] = df['lots'].apply(lambda x: ' '.join(dict.fromkeys(x).keys()))
+    gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
+    counties = get_record_dict(setID)[0]
+    selected_cnty = gdf.county.isin(counties[1:])
+    record_dict = get_record_dict(setID)[1]
+    gdf.loc[selected_cnty, 'nrecordID'] = gdf.loc[selected_cnty, 'record_ID'] + gdf[selected_cnty].county.map(record_dict)
+    gdf.loc[gdf.county == counties[0], 'nrecordID'] = gdf.loc[gdf.county == counties[0], 'record_ID']
+    gdf.loc[:, 'nrecordID'] = gdf.nrecordID.astype('int64', copy=False)
+    if export:
+        gdf.rename(columns={'wetdet_delin_number': 'wdID', 
+                      'address_location_desc':'loc_desc', 
+                      'Coord-Source': 'coord_src',
+                      'DocumentName':'doc_name',
+                      'DecisionLink':'doc_link',
+                      'is_batch_file':'isbatfile',
+                      'status_name': 'status_nm',
+                      'received_date':'receiveddt', 
+                      'response_date':'responsedt',
+                      'reissuance_response_date':'reissuance', 
+                      }, inplace=True)
+        gdf[~gdf.geometry.isnull()].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
+                                                  driver='ESRI Shapefile')  
+    return gdf
+
+# report the unmatched data
+def report_unmatched(gdf, setID, mute = False):
+    wd_df = combine_wd_table(setID)
+    matched_rID = gdf.nrecordID.unique()
+    unmatched_wd_df = wd_df[~wd_df.record_ID.isin(matched_rID)]
+    nc = unmatched_wd_df[unmatched_wd_df.parcel_id.astype(str) == 'nan'].shape[0]
+    nr = round((nc/wd_df.shape[0]) * 100, 2)
+    r = round((unmatched_wd_df.shape[0]/wd_df.shape[0]) * 100, 2)
+    if not mute:
+        print(f'it is about {r}% of data in the original {wd_df.shape[0]} records unmatched')
+        print(f'there are {nc} records ({nr}% of the original records) without parcel id')
+    return unmatched_wd_df
+    
+# compare the output data with the existing data
+def compare_data_report(gdf, setID, export = False):
+    unmatched_wd_df = report_unmatched(gdf, setID, mute = True)
+    # unmatched IDs from the run
+    missed_ID = unmatched_wd_df.record_ID.unique()
+    setgdf = gpd.read_file(os.path.join(inpath, 'GIS', 'Join_Statewide.gdb'), layer=f'WD_{setID}_Combined')
+    matched_rID = gdf.nrecordID.unique()
+    # missed IDs in the existing data that is not nan
+    missed_gdf = setgdf[setgdf.Record_ID.astype(str) != 'nan'][~setgdf.Record_ID.isin(matched_rID)]
+    missedID = missed_gdf.Record_ID.astype('int64', copy=False)
+    # matched IDs in the existing data that is not nan
+    matched_gdf = setgdf[(setgdf.Record_ID.astype(str) != 'nan') & (setgdf.Record_ID.isin(matched_rID))]
+    matchedID = matched_gdf.Record_ID.unique()
+    missed_match_ID = [ID for ID in list(matched_rID) if ID not in list(matchedID)]
+    missed_gdf = gdf[gdf.nrecordID.isin(missed_match_ID)]
+    if export:
+        missed_gdf[~missed_gdf.geometry.isnull()].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'missed_records_in_{setID}_res.shp'), 
+                                                  driver='ESRI Shapefile')
+    return missed_match_ID, missed_gdf
+
+def combine_taxlot():
+    frames = []
+    for year in range(yearstart, yearend):
+        tx_dt = read_taxlot(year)
+        tx_dt['year'] = year
+        frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])
+    df = pd.concat(frames, ignore_index=True)
+    gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
+    return gdf
+    
     
