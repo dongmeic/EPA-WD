@@ -314,6 +314,10 @@ def merge_matched(setID, all_taxlot, export=False):
     n_gdf = gdf.append(tocheck_gdf)
     if export:
         n_gdf['lots'] = n_gdf['lots'].apply(lambda x: ' '.join(dict.fromkeys(x).keys()))
-        n_gdf[['record_ID', 'wdID', 'ORTaxlot', 'geometry']].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'combined_records_in_{setID}.shp'), driver='ESRI Shapefile')
+        n_gdf[['record_ID', 'wdID', 'parcel_id', 'ORTaxlot', 'geometry']].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'combined_records_in_{setID}.shp'), driver='ESRI Shapefile')
     return n_gdf
-    
+ 
+def records_without_lots(gdf, setID):
+    unmatched_wd_df = report_unmatched(gdf, setID)
+    double_check = unmatched_wd_df[unmatched_wd_df.missinglot == 'Y']
+    return double_check
