@@ -124,6 +124,11 @@ def combine_wd_table(setID):
     # this creates unique IDs for all the records in the same set
     wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1)
     selectedID = wd_df.parcel_id.astype(str) != 'nan'
+    wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
+    # get year from the receive date
+    wd_df.loc[:, 'year'] = wd_df.received_date.apply(lambda x: x.year)
+    # get year from the wd ID 
+    wd_df.loc[:, 'IDyear'] = wd_df.wetdet_delin_number.apply(lambda x: x[2:6]) 
     wd_df.loc[selectedID, 'missinglot'] = wd_df[selectedID].parcel_id.apply(lambda x: without_lots(x))
     return wd_df
 
@@ -271,4 +276,44 @@ def combine_taxlot():
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
     
+def rematch_data(gdf, setID, all_taxlot):
+    all_txid = all_taxlot.ORTaxlot.unique()
+    unmatched_wd_df = report_unmatched(gdf, setID)
+    double_check = unmatched_wd_df[unmatched_wd_df.missinglot == 'N']
+    double_check_ri = reindex_data(double_check)
+    tocheck_txid = double_check_ri.ORTaxlot.unique()
+    found = [txid for txid in tocheck_txid if txid in all_txid]
+    if len(found) > 0:
+        tocheck_df = double_check_ri[double_check_ri.ORTaxlot.isin(found)]
+        taxlot_tocheck = all_taxlot[all_taxlot.ORTaxlot.isin(found)]
+        taxlot_tocheck = taxlot_tocheck.merge(tocheck_df[['record_ID', 'ORTaxlot', 'IDyear']], on='ORTaxlot', how='left')
+        taxlot_tocheck.loc[:, 'ydiff'] = taxlot_tocheck[['year', 'IDyear']].apply(lambda row: abs(row.year - int(row.IDyear)), axis=1)
+        df = taxlot_tocheck.sort_values(by=['ORTaxlot', 'ydiff'])
+        # keep the taxlot from the closest year
+        df = df.drop_duplicates(subset='ORTaxlot', keep="first")
+        tocheck_gdf = tocheck_df.merge(df[['ORTaxlot', 'geometry']], on='ORTaxlot')
+        tocheck_gdf.rename(columns={'wetdet_delin_number': 'wdID', 
+                      'address_location_desc':'loc_desc', 
+                      'Coord-Source': 'coord_src',
+                      'DocumentName':'doc_name',
+                      'DecisionLink':'doc_link',
+                      'is_batch_file':'isbatfile',
+                      'status_name': 'status_nm',
+                      'received_date':'receiveddt', 
+                      'response_date':'responsedt',
+                      'reissuance_response_date':'reissuance', 
+                      }, inplace=True)
+        return tocheck_gdf
+    
+def merge_matched(setID, all_taxlot, export=False):
+    gdf = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')
+    tocheck_gdf = rematch_data(gdf=gdf, setID=setID, all_taxlot=all_taxlot)
+    gdf = gdf.drop(['record_ID'], axis=1)
+    gdf.rename(columns={'nrecordID': 'record_ID'}, inplace=True)
+    tocheck_gdf = tocheck_gdf[gdf.columns]
+    n_gdf = gdf.append(tocheck_gdf)
+    if export:
+        n_gdf['lots'] = n_gdf['lots'].apply(lambda x: ' '.join(dict.fromkeys(x).keys()))
+        n_gdf[['record_ID', 'wdID', 'ORTaxlot', 'geometry']].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'combined_records_in_{setID}.shp'), driver='ESRI Shapefile')
+    return n_gdf
     
