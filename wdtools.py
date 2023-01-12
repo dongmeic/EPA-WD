@@ -59,7 +59,7 @@ def check_duplicates(v):
     itemlist = [item for item, count in collections.Counter(v).items() if count > 1]
     return itemlist, len(itemlist)
 
-# read wd tables
+# read wd tables, record_ID is used for single tables
 def read_wd_table(setID, file):
     datafile = os.path.join(wdpath, setID, file)
     xl = pd.ExcelFile(datafile)
@@ -109,7 +109,7 @@ def without_lots(text):
         res = 'Y'
     return res
 
-# combine all the wd tables in the set to review unique records
+# combine all the wd tables in the set to review unique records, record_ID is used for combined tables
 def combine_wd_table(setID):
     files = list_files(os.path.join(wdpath, setID))
     # in case there are unidentified files
@@ -142,7 +142,7 @@ def read_taxlot(year, mute=True):
         print(f'got taxlot data in {year} and it took about {str(round((end - start)/60, 0))} minutes')
     return tx_dt
 
-# merge wd table with taxlot polygons
+# merge wd table with taxlot polygons in a single year
 def merge_data(setID, file, year):
     wd_dt = clean_wd_table(setID, file)
     tx_dt = read_taxlot(year)
@@ -233,7 +233,7 @@ def combine_merged_data(setID, export=False):
                                                   driver='ESRI Shapefile')  
     return gdf
 
-# report the unmatched data
+# report the unmatched data after matching the same year data
 def report_unmatched(gdf, setID, mute = False):
     wd_df = combine_wd_table(setID)
     matched_rID = gdf.nrecordID.unique()
@@ -246,7 +246,7 @@ def report_unmatched(gdf, setID, mute = False):
         print(f'there are {nc} records ({nr}% of the original records) without parcel id')
     return unmatched_wd_df
     
-# compare the output data with the existing data
+# compare the output data with the existing output from the manual process
 def compare_data_report(gdf, setID, export = False):
     unmatched_wd_df = report_unmatched(gdf, setID, mute = True)
     # unmatched IDs from the run
@@ -266,6 +266,7 @@ def compare_data_report(gdf, setID, export = False):
                                                   driver='ESRI Shapefile')
     return missed_match_ID, missed_gdf
 
+# combine taxlots
 def combine_taxlot():
     frames = []
     for year in range(yearstart, yearend):
@@ -275,11 +276,11 @@ def combine_taxlot():
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
-    
+
+# get the geometry from adjacent years with the same taxlot ID
 def rematch_data(gdf, setID, all_taxlot):
     all_txid = all_taxlot.ORTaxlot.unique()
-    unmatched_wd_df = report_unmatched(gdf, setID)
-    double_check = unmatched_wd_df[unmatched_wd_df.missinglot == 'N']
+    double_check = records_with_lots(gdf, setID, c='N')
     double_check_ri = reindex_data(double_check)
     tocheck_txid = double_check_ri.ORTaxlot.unique()
     found = [txid for txid in tocheck_txid if txid in all_txid]
@@ -304,7 +305,8 @@ def rematch_data(gdf, setID, all_taxlot):
                       'reissuance_response_date':'reissuance', 
                       }, inplace=True)
         return tocheck_gdf
-    
+
+# merge the matched from exact taxlot IDs
 def merge_matched(setID, all_taxlot, export=False):
     gdf = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')
     tocheck_gdf = rematch_data(gdf=gdf, setID=setID, all_taxlot=all_taxlot)
@@ -316,8 +318,45 @@ def merge_matched(setID, all_taxlot, export=False):
         n_gdf['lots'] = n_gdf['lots'].apply(lambda x: ' '.join(dict.fromkeys(x).keys()))
         n_gdf[['record_ID', 'wdID', 'parcel_id', 'ORTaxlot', 'geometry']].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'combined_records_in_{setID}.shp'), driver='ESRI Shapefile')
     return n_gdf
- 
-def records_without_lots(gdf, setID):
-    unmatched_wd_df = report_unmatched(gdf, setID)
-    double_check = unmatched_wd_df[unmatched_wd_df.missinglot == 'Y']
+
+# get the unmatched records with/without taxlot IDs
+def records_with_lots(gdf, setID, c='Y'):
+    unmatched_wd_df = report_unmatched(gdf, setID, mute = True)
+    double_check = unmatched_wd_df[unmatched_wd_df.missinglot == c]
     return double_check
+
+# export mapped data (and missed matched data) from the existing to review the patterns of trsqq
+def review_mapped_data(gdf, setID, all_taxlot, export=False):
+    setgdf = gpd.read_file(os.path.join(inpath, 'GIS', 'Join_Statewide.gdb'), layer=f'WD_{setID}_Combined')
+    to_map_rID = review_with_lots(gdf, setID, all_taxlot)[1]
+    mapped = setgdf[setgdf.Record_ID.isin(to_map_rID)]
+    if export:
+        mapped.rename(columns={'wetdet_delin_number': 'wdID', 
+                      'address_location_desc':'loc_desc', 
+                      'Coord-Source': 'coord_src',
+                      'DocumentName':'doc_name',
+                      'DecisionLink':'doc_link',
+                      'is_batch_file':'isbatfile',
+                      'status_name': 'status_nm',
+                      'received_date':'receiveddt', 
+                      'response_date':'responsedt',
+                      'reissuance_response_date':'reissuance', 
+                      'Match_found':'matchfound', 
+                      'Manual_note': 'notes',
+                      'Edits_Complete': 'edits'
+                      }, inplace=True)
+        selcols = list(mapped.columns[list(map(lambda x: x <= 10, list(map(len, list(mapped.columns)))))])
+        mapped[selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'mapped_in_{set_ID}.shp'), 
+                                                  driver='ESRI Shapefile')
+    return mapped
+
+# review the unmatched records with taxlot IDs to rematch with a revised trsqq
+def review_with_lots(gdf, setID, all_taxlot):
+    n_gdf = merge_matched(setID, all_taxlot)
+    wd_df = combine_wd_table(setID)
+    df_wo_lots = records_with_lots(gdf, setID, c='Y')
+    wo_lots_ID = df_wo_lots.record_ID.unique()
+    to_map_rID = [rID for rID in wd_df.record_ID.values if rID not in n_gdf.record_ID.unique()]
+    unmatched_wlots_ID = [rID for rID in to_map_rID if rID not in wo_lots_ID]
+    wlots_df = wd_df[wd_df.record_ID.isin(unmatched_wlots_ID)]  
+    return wlots_df, to_map_rID
