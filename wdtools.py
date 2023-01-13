@@ -190,7 +190,7 @@ def get_record_dict(setID):
     record_dict = dict(zip(record_df.county[1:len(counties)], record_df.cum_count[0:(len(counties)-1)]))
     return counties, record_dict
 
-# merge data by year and combine all tables in the same set
+# merge data by year and combine all tables in the same set with the match in the same year
 def combine_merged_data(setID, export=False):
     files = list_files(os.path.join(wdpath, setID))
     files = [file for file in files if '~$' not in file]
@@ -306,7 +306,7 @@ def rematch_data(gdf, setID, all_taxlot):
                       }, inplace=True)
         return tocheck_gdf
 
-# merge the matched from exact taxlot IDs
+# merge the matched from exact taxlot IDs within the same or adjacent year
 def merge_matched(setID, all_taxlot, export=False):
     gdf = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')
     tocheck_gdf = rematch_data(gdf=gdf, setID=setID, all_taxlot=all_taxlot)
@@ -360,3 +360,5 @@ def review_with_lots(gdf, setID, all_taxlot):
     unmatched_wlots_ID = [rID for rID in to_map_rID if rID not in wo_lots_ID]
     wlots_df = wd_df[wd_df.record_ID.isin(unmatched_wlots_ID)]  
     return wlots_df, to_map_rID
+
+# 
