@@ -17,6 +17,7 @@ yearstart = 2017
 yearend = 2023
 outfolder = 'test'
 
+# gdf below generally refers to the matched records
 # create a spreadsheet to create a dictionary
 cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
 
@@ -70,7 +71,7 @@ def read_wd_table(setID, file):
 
 def reindex_data(wd_dt):
     # get a list of lot numbers in each parcel id record
-    wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(x))
+    wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(str(x)))
     # repeat the rows based on the number of lot numbers
     ndf = wd_dt.reindex(wd_dt.index.repeat(wd_dt.lots.str.len()))
     # add the column to list the lot for all
@@ -271,16 +272,19 @@ def combine_taxlot():
     frames = []
     for year in range(yearstart, yearend):
         tx_dt = read_taxlot(year)
-        tx_dt['year'] = year
+        tx_dt['year'] = str(year)
         frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
 
 # get the geometry from adjacent years with the same taxlot ID
-def rematch_data(gdf, setID, all_taxlot):
+def rematch_data(gdf, setID, all_taxlot, new=False):
     all_txid = all_taxlot.ORTaxlot.unique()
-    double_check = records_with_lots(gdf, setID, c='N')
+    if new:
+        double_check = gdf
+    else:
+        double_check = records_with_lots(gdf, setID, c='N')
     double_check_ri = reindex_data(double_check)
     tocheck_txid = double_check_ri.ORTaxlot.unique()
     found = [txid for txid in tocheck_txid if txid in all_txid]
@@ -288,7 +292,7 @@ def rematch_data(gdf, setID, all_taxlot):
         tocheck_df = double_check_ri[double_check_ri.ORTaxlot.isin(found)]
         taxlot_tocheck = all_taxlot[all_taxlot.ORTaxlot.isin(found)]
         taxlot_tocheck = taxlot_tocheck.merge(tocheck_df[['record_ID', 'ORTaxlot', 'IDyear']], on='ORTaxlot', how='left')
-        taxlot_tocheck.loc[:, 'ydiff'] = taxlot_tocheck[['year', 'IDyear']].apply(lambda row: abs(row.year - int(row.IDyear)), axis=1)
+        taxlot_tocheck.loc[:, 'ydiff'] = taxlot_tocheck[['year', 'IDyear']].apply(lambda row: abs(int(row.year) - int(row.IDyear)), axis=1)
         df = taxlot_tocheck.sort_values(by=['ORTaxlot', 'ydiff'])
         # keep the taxlot from the closest year
         df = df.drop_duplicates(subset='ORTaxlot', keep="first")
@@ -350,7 +354,7 @@ def review_mapped_data(gdf, setID, all_taxlot, export=False):
                                                   driver='ESRI Shapefile')
     return mapped
 
-# review the unmatched records with taxlot IDs to rematch with a revised trsqq
+# review the unmatched records with taxlot IDs to rematch with corrected data info
 def review_with_lots(gdf, setID, all_taxlot):
     n_gdf = merge_matched(setID, all_taxlot)
     wd_df = combine_wd_table(setID)
@@ -373,8 +377,18 @@ def check_corrected_data(gdf, setID, all_taxlot):
     comIDs = [ID for ID in IDs1 if ID in IDs2]
     wdID_to_check = [wdID for wdID in df_wlots.wetdet_delin_number.values if wdID not in corrected.wetdet_delin_number.values]
     df_wlots_to_check = df_wlots[df_wlots.wetdet_delin_number.isin(wdID_to_check)]
+    cols1 = df_wlots.columns
+    cols2 = corrected.columns
+    comcols = [col for col in cols1 if col in cols2]
+    cols = [col for col in df_wlots.columns if col not in comcols]
+    cols.append('wetdet_delin_number')
+    df_wlots = df_wlots[cols]
     if len(comIDs) > 0:
         df_wlots = df_wlots[~df_wlots.wetdet_delin_number.isin(comIDs)]
         corrected = corrected[~corrected.wetdet_delin_number.isin(comIDs)]
-    cor_df = corrected.merge(df_wlots[['wetdet_delin_number', 'trsqq', 'parcel_id']], on = 'wetdet_delin_number') 
+    cor_df = corrected.merge(df_wlots, on = 'wetdet_delin_number')
+    cor_df = cor_df.drop(['trsqq', 'parcel_id'], axis=1)
+    cor_df.rename(columns={'cor_trsqq': 'trsqq', 
+                          'cor_parcel_id': 'parcel_id',
+                          'year': 'Year'}, inplace=True)
     return cor_df, comIDs, df_wlots_to_check
