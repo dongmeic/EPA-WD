@@ -361,4 +361,20 @@ def review_with_lots(gdf, setID, all_taxlot):
     wlots_df = wd_df[wd_df.record_ID.isin(unmatched_wlots_ID)]  
     return wlots_df, to_map_rID
 
-# 
+# update match on the corrected data
+def check_corrected_data(gdf, setID, all_taxlot):
+    corrected = pd.read_excel(os.path.join(inpath, 'DSL data originals', 'Data corrections feedback to DSL', 
+                           f'DSL Database corrections {setID}.xlsx'))
+    corrected.rename(columns={'trsqq': 'cor_trsqq', 
+                          'parcel_id':'cor_parcel_id'}, inplace=True)
+    df_wlots = review_with_lots(gdf, setID, all_taxlot)[0]
+    IDs1 = check_duplicates(df_wlots.wetdet_delin_number.values)[0]
+    IDs2 = check_duplicates(corrected.wetdet_delin_number.values)[0]
+    comIDs = [ID for ID in IDs1 if ID in IDs2]
+    wdID_to_check = [wdID for wdID in df_wlots.wetdet_delin_number.values if wdID not in corrected.wetdet_delin_number.values]
+    df_wlots_to_check = df_wlots[df_wlots.wetdet_delin_number.isin(wdID_to_check)]
+    if len(comIDs) > 0:
+        df_wlots = df_wlots[~df_wlots.wetdet_delin_number.isin(comIDs)]
+        corrected = corrected[~corrected.wetdet_delin_number.isin(comIDs)]
+    cor_df = corrected.merge(df_wlots[['wetdet_delin_number', 'trsqq', 'parcel_id']], on = 'wetdet_delin_number') 
+    return cor_df, comIDs, df_wlots_to_check
