@@ -103,6 +103,7 @@ def clean_wd_table(setID, file):
     #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return ndf
 
+# check whether the parcel ID that is without lots
 def without_lots(text):
     if any(c.isdigit() for c in text):
         nms = re.findall(r'\d+', text)
@@ -151,6 +152,7 @@ def read_taxlot(year, mute=True):
     return tx_dt
 
 # merge wd table with taxlot polygons in a single year
+# use this function when checking data by year
 def merge_data_by_year(setID, file, year):
     wd_dt = clean_wd_table(setID, file)
     tx_dt = read_taxlot(year)
@@ -187,7 +189,7 @@ def get_record_dict(setID):
     # read all set001 data without merging
     wd_df = combine_wd_tables(setID)
     selectedID = wd_df.parcel_id.astype(str) != 'nan'
-    wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
+    wd_df.loc[selectedID, 'notes'] = wd_df.loc[selectedID, 'parcel_id'].apply(lambda x: make_notes(x))
     counties = wd_df.county.unique()
     count_records = []
     for cnty in counties:
@@ -198,7 +200,7 @@ def get_record_dict(setID):
     record_dict = dict(zip(record_df.county[1:len(counties)], record_df.cum_count[0:(len(counties)-1)]))
     return counties, record_dict
 
-# combine taxlots
+# combine taxlots from all years
 def combine_taxlot():
     frames = []
     for year in range(yearstart, yearend):
@@ -260,7 +262,7 @@ def combined_reindexed_data(setID):
     wd_df = update_record(df, setID)
     return wd_df 
     
-# merge data by year and combine all tables in the same set with the match in the same or adjacent year
+# combine all tables in the same set with the match in the same or adjacent year
 def match_taxlot(setID, all_taxlot, export=False):
     all_txid = all_taxlot.ORTaxlot.unique()
     wd_df = combined_reindexed_data(setID)
@@ -312,6 +314,18 @@ def records_with_lots(gdf, setID, c='Y'):
     double_check = unmatched_wd_df[unmatched_wd_df.missinglot == c]
     return double_check
 
+# review the unmatched records with taxlot IDs to rematch with corrected data info
+# gdf from match_taxlot
+def review_with_lots(setID, all_taxlot):
+    n_gdf = match_taxlot(setID, all_taxlot)
+    wd_df = combine_wd_tables(setID)
+    df_wo_lots = records_with_lots(n_gdf, setID, c='Y')
+    wo_lots_ID = df_wo_lots.record_ID.unique()
+    to_map_rID = [rID for rID in wd_df.record_ID.values if rID not in n_gdf.record_ID.unique()]
+    unmatched_wlots_ID = [rID for rID in to_map_rID if rID not in wo_lots_ID]
+    wlots_df = wd_df[wd_df.record_ID.isin(unmatched_wlots_ID)]  
+    return n_gdf, wlots_df, to_map_rID
+
 # export mapped data (and missed matched data) from the existing to review the patterns of trsqq
 # gdf from match_taxlot
 def review_mapped_data(gdf, setID, all_taxlot, export=False):
@@ -337,18 +351,6 @@ def review_mapped_data(gdf, setID, all_taxlot, export=False):
         mapped[selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'mapped_in_{set_ID}.shp'), 
                                                   driver='ESRI Shapefile')
     return mapped
-
-# review the unmatched records with taxlot IDs to rematch with corrected data info
-# gdf from match_taxlot
-def review_with_lots(setID, all_taxlot):
-    n_gdf = match_taxlot(setID, all_taxlot)
-    wd_df = combine_wd_tables(setID)
-    df_wo_lots = records_with_lots(n_gdf, setID, c='Y')
-    wo_lots_ID = df_wo_lots.record_ID.unique()
-    to_map_rID = [rID for rID in wd_df.record_ID.values if rID not in n_gdf.record_ID.unique()]
-    unmatched_wlots_ID = [rID for rID in to_map_rID if rID not in wo_lots_ID]
-    wlots_df = wd_df[wd_df.record_ID.isin(unmatched_wlots_ID)]  
-    return n_gdf, wlots_df, to_map_rID
 
 # update match on the corrected data
 # gdf from match_taxlot
