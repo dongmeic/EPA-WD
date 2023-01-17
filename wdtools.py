@@ -10,6 +10,8 @@ import time
 import collections
 import datetime
 import string
+import difflib
+import pickle
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 wdpath = inpath + '\\DSL data originals'
@@ -201,7 +203,7 @@ def get_record_dict(setID):
     return counties, record_dict
 
 # combine taxlots from all years
-def combine_taxlot():
+def combine_taxlot(exportID=False):
     frames = []
     for year in range(yearstart, yearend):
         tx_dt = read_taxlot(year)
@@ -209,10 +211,13 @@ def combine_taxlot():
         frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
+    if exportID:
+        with open(os.path.join(inpath, 'test', "ORTaxlot.pkl"), "wb") as f:
+            pickle.dump(list(gdf.ORTaxlot.unique()), f) 
     return gdf
 
 # update record_ID if needed
-def update_record(df, setID):
+def update_recordID(df, setID):
     counties = get_record_dict(setID)[0]
     selected_cnty = df.county.isin(counties[1:])
     record_dict = get_record_dict(setID)[1]
@@ -223,7 +228,8 @@ def update_record(df, setID):
 
 # get the geometry from adjacent years with the same taxlot ID
 # df is reindexed from combined_reindexed_data
-def rematch_data(df, setID, all_taxlot):
+# return geodata with matched geometry
+def match_wd_data_with_taxlot(df, setID, all_taxlot):
     all_txid = all_taxlot.ORTaxlot.unique()
     tocheck_txid = df.ORTaxlot.unique()
     found = [txid for txid in tocheck_txid if txid in all_txid]
@@ -259,14 +265,14 @@ def combined_reindexed_data(setID):
         wd_dt = clean_wd_table(setID, file = file)  
         frames.append(wd_dt)
     df = pd.concat(frames, ignore_index=True)
-    wd_df = update_record(df, setID)
+    wd_df = update_recordID(df, setID)
     return wd_df 
     
 # combine all tables in the same set with the match in the same or adjacent year
 def match_taxlot(setID, all_taxlot, export=False):
     all_txid = all_taxlot.ORTaxlot.unique()
     wd_df = combined_reindexed_data(setID)
-    gdf = rematch_data(df=wd_df, setID=setID, all_taxlot=all_taxlot)
+    gdf = match_wd_data_with_taxlot(df=wd_df, setID=setID, all_taxlot=all_taxlot)
     if export:
         gdf[~gdf.geometry.isnull()].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
                                                   driver='ESRI Shapefile')  
@@ -354,6 +360,7 @@ def review_mapped_data(gdf, setID, all_taxlot, export=False):
 
 # update match on the corrected data
 # gdf from match_taxlot
+# return matched data with corrected info
 def check_corrected_data(setID, all_taxlot, export=False):
     corrected = pd.read_excel(os.path.join(inpath, 'DSL data originals', 'Data corrections feedback to DSL', 
                            f'DSL Database corrections {setID}.xlsx'))
@@ -383,10 +390,46 @@ def check_corrected_data(setID, all_taxlot, export=False):
     df_wlots_to_check = df_wlots[df_wlots.wetdet_delin_number.isin(wdID_to_check+comIDs)]
     cor_df.loc[:, 'county'] = cor_df.county.apply(lambda x: string.capwords(x))
     cor_df = reindex_data(cor_df)
-    cor_df_re = rematch_data(df=cor_df, setID=setID, all_taxlot=all_taxlot)
+    cor_df_re = match_wd_data_with_taxlot(df=cor_df, setID=setID, all_taxlot=all_taxlot)
     collist = list(gdf.columns)
     collist.remove('recordID')
     ngdf = gdf.append(cor_df_re[collist])
     if export:
         ngdf.to_file(os.path.join(inpath + f'\\{outfolder}\\', f'combined_records_in_{setID}.shp'), driver='ESRI Shapefile')
     return ngdf, cor_df, comIDs, df_wlots_to_check
+
+# update match with similar trsqq
+def get_trsqq_list():
+    with open(os.path.join(inpath, 'test', "ORTaxlot.pkl"), "rb") as f:
+        taxlotIDs_to_search = pickle.load(f)
+    taxlotIDs_cleaned = unique([txID for txID in taxlotIDs_to_search if len(txID) == 29])
+    trsqq = list(map(lambda x: x[2:4] + x[7:10] + x[13:18], taxlotIDs_cleaned))
+    trsqq_dict = dict(zip(trsqq, taxlotIDs_cleaned))
+    df = pd.DataFrame({'ORTaxlot':taxlotIDs_cleaned, 'trsqq':trsqq})
+    return trsqq, trsqq_dict, df
+
+# get the maybe taxlot
+def get_maybe_taxlot(trsqq_to_check):
+    res = get_trsqq_list()
+    trsqq = res[0] 
+    trsqq_dict = res[1]
+    df = res[2]
+    closematch = difflib.get_close_matches(trsqq_to_check, trsqq)
+    trsqq_matched = unique(closematch)
+    checktaxlot = [*map(trsqq_dict.get, trsqq_matched)]
+    string_to_search = trsqq_matched[0][0:8]
+    search_res = unique([i for i in unique(df.trsqq) if string_to_search in i])
+    if len(checktaxlot) == 1 and len(search_res)==1:
+        values = [i for i in trsqq_dict if trsqq_dict[i]==checktaxlot[0]]
+    else:
+        values = search_res
+    return values
+
+# reorganize the tocheck data
+# tocheck_df is the last output of check_corrected_data - df_wlots_to_check
+# trsqq_n - new trsqq
+# n_trsqq - number of possibly corrected trsqq values from the search
+def reorganize_tocheck(tocheck_df):
+    tocheck_df.loc[:, 'trsqq_n'] = tocheck_df.loc[:, 'trsqq'].apply(lambda x: get_maybe_taxlot(x))
+    tocheck_df.loc[:, 'n_trsqq'] = tocheck_df.loc[:, 'trsqq_n'].apply(lambda x: len(x))
+    return tocheck_df
