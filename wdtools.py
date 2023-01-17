@@ -72,6 +72,7 @@ def read_wd_table(setID, file):
     wd_dt.loc[:, 'recordID'] = range(1, wd_dt.shape[0] + 1)
     return wd_dt
 
+# wd_dt is from read_wd_table or reorganize_tocheck
 def reindex_data(wd_dt):
     # get a list of lot numbers in each parcel id record
     wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(str(x)))
@@ -432,4 +433,8 @@ def get_maybe_taxlot(trsqq_to_check):
 def reorganize_tocheck(tocheck_df):
     tocheck_df.loc[:, 'trsqq_n'] = tocheck_df.loc[:, 'trsqq'].apply(lambda x: get_maybe_taxlot(x))
     tocheck_df.loc[:, 'n_trsqq'] = tocheck_df.loc[:, 'trsqq_n'].apply(lambda x: len(x))
-    return tocheck_df
+    torematch_df = tocheck_df[tocheck_df.n_trsqq == 1]
+    res = get_trsqq_list()
+    trsqq_dict = res[1]
+    torematch_df.loc[:, 'ORTaxlot'] = torematch_df.trsqq_n.apply(lambda x: [*map(trsqq_dict.get, x)][0])
+    return tocheck_df, torematch_df
