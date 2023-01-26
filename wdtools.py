@@ -22,7 +22,7 @@ yearend = 2023
 outfolder = 'output\\matched'
 
 # gdf below generally refers to the matched records
-# create a spreadsheet to create a dictionary
+# create a spreadsheet to create a dictionary for the match between county name and code
 cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
 
 # create a dictionary to look up county code
@@ -64,7 +64,7 @@ def check_duplicates(v):
     itemlist = [item for item, count in collections.Counter(v).items() if count > 1]
     return itemlist, len(itemlist)
 
-# read wd tables, record_ID is used for single tables
+# read wd tables, recordID is used for single tables
 def read_wd_table(setID, file):
     datafile = os.path.join(wdpath, setID, file)
     xl = pd.ExcelFile(datafile)
@@ -74,6 +74,7 @@ def read_wd_table(setID, file):
     return wd_dt
 
 # wd_dt is from read_wd_table or reorganize_tocheck
+# return reindexed data
 def reindex_data(wd_dt):
     # get a list of lot numbers in each parcel id record
     wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(str(x)))
@@ -81,6 +82,7 @@ def reindex_data(wd_dt):
     ndf = wd_dt.reindex(wd_dt.index.repeat(wd_dt.lots.str.len()))
     # add the column to list the lot for all
     ndf.loc[:, 'lot'] = list(chain.from_iterable(wd_dt.lots.values.tolist()))
+    ndf['lots'] = ndf['lots'].apply(lambda x: ', '.join(dict.fromkeys(x).keys()))
     # get county code
     ndf.loc[:, 'cnt_code'] = ndf.county.map(cnt_dict)
     # get OR taxlot IDs for wd data
@@ -109,7 +111,7 @@ def make_notes(text):
         res = 'many'    
     return res
 
-# function to clean up wd data
+# function to clean up wd data by single file
 def clean_wd_table(setID, file):
     start = time.time()
     wd_dt = read_wd_table(setID, file)
@@ -124,7 +126,6 @@ def clean_wd_table(setID, file):
     ndf.loc[selectedID, 'missinglot'] = ndf.loc[selectedID, 'parcel_id'].apply(lambda x: without_lots(x))
     ndf['response_date'] = ndf['response_date'].dt.strftime("%Y-%m-%d")
     ndf['received_date'] = ndf['received_date'].dt.strftime("%Y-%m-%d")
-    ndf['lots'] = ndf['lots'].apply(lambda x: ' '.join(dict.fromkeys(x).keys()))
     end = time.time()
     #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return ndf
@@ -144,6 +145,7 @@ def without_lots(text):
 
 # combine all the wd tables in the set to review unique records, record_ID is used for combined tables
 # use this function when reindex is not neccessary
+# nm_to_add is the number of previous records (records from the previous sets; same to all functions with this variable)
 def combine_wd_tables(setID, nm_to_add):
     files = list_files(os.path.join(wdpath, setID))
     # in case there are unidentified files
@@ -217,7 +219,7 @@ def combine_taxlot(exportID=False):
     return gdf
 
 # update record_ID if needed
-# wd_df is the output from combine_wd_tables (read all set001 data without merging
+# wd_df is the output from combine_wd_tables (read all files in the same set without merging with taxlots)
 # df is the reindexed wd data, from combined_reindexed_data
 def update_recordID(df, wd_df, setID, nm_to_add):
     counties = get_record_dict(setID, wd_df)[0]
@@ -228,7 +230,7 @@ def update_recordID(df, wd_df, setID, nm_to_add):
     df.loc[:, 'record_ID'] = df.record_ID.astype('int64', copy=False)
     return df
 
-# combine reindexed wd data
+# combine reindexed wd data in the same set folder
 def combined_reindexed_data(setID, nm_to_add):
     frames = []
     files = list_files(os.path.join(wdpath, setID))
@@ -245,6 +247,7 @@ def combined_reindexed_data(setID, nm_to_add):
 # get the geometry from adjacent years with the same taxlot ID
 # df is reindexed from combined_reindexed_data
 # return geodata with matched geometry
+# run this to include only the matched records with the original ID
 def match_wd_data_with_taxlot(df, setID, all_taxlot, nm_to_add, export=False):
     with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
         all_txid = pickle.load(f)
@@ -272,7 +275,6 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, nm_to_add, export=False):
                       }, inplace=True)
     ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
     if export: 
-        ngdf['lots'] = ngdf['lots'].apply(lambda x: ' '.join(dict.fromkeys(x).keys()))
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
         ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
                                                   driver='ESRI Shapefile')  
@@ -397,10 +399,9 @@ def check_corrected_data(df, setID, all_taxlot, nm_to_add, export=False):
     ndf = gdf.append(cor_df_re[collist])
     if export:
         ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
-        ngdf['lots'] = ngdf['lots'].apply(lambda x: ' '.join(dict.fromkeys(x).keys()))
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
-        ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + '\\output\\matched\\', f'combined_records_in_{setID}.shp'), driver='ESRI Shapefile')
-    return ndf, cor_df, comIDs, df_wlots_to_check
+        ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + '\\output\\matched\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')
+    return ndf, cor_df, comIDs, df_wlots_to_checkb
 
 # update match with similar trsqq
 def get_trsqq_list():
@@ -413,6 +414,7 @@ def get_trsqq_list():
     return trsqq, trsqq_dict, df
 
 # get the maybe taxlot
+# this is a test function
 def get_maybe_taxlot(trsqq_to_check):
     res = get_trsqq_list()
     trsqq = res[0] 
@@ -430,9 +432,10 @@ def get_maybe_taxlot(trsqq_to_check):
     return values
 
 # reorganize the tocheck data
-# tocheck_df is the last output of check_corrected_data - df_wlots_to_check
-# trsqq_n - new trsqq
-# n_trsqq - number of possibly corrected trsqq values from the search
+# tocheck_df is the last output of check_corrected_data: df_wlots_to_check
+# trsqq_n: new trsqq
+# n_trsqq: number of possibly corrected trsqq values from the search
+# this is a test function
 def reorganize_tocheck(tocheck_df):
     tocheck_df.loc[:, 'trsqq_n'] = tocheck_df.loc[:, 'trsqq'].apply(lambda x: get_maybe_taxlot(x))
     tocheck_df.loc[:, 'n_trsqq'] = tocheck_df.loc[:, 'trsqq_n'].apply(lambda x: len(x))
