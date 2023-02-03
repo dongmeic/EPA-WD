@@ -130,7 +130,7 @@ def clean_wd_table(setID, file):
     #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return ndf
 
-# check whether the parcel ID that is without lots
+# check whether the parcel ID is without lots
 def without_lots(text):
     if any(c.isdigit() for c in text):
         nms = re.findall(r'\d+', text)
@@ -271,9 +271,9 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, nm_to_add, export=False):
                       'status_name': 'status_nm',
                       'received_date':'receiveddt', 
                       'response_date':'responsedt',
-                      'reissuance_response_date':'reissuance', 
+                      'reissuance_response_date':'reissuance' 
                       }, inplace=True)
-    ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
+        ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
     if export: 
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
         ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
@@ -296,24 +296,50 @@ def report_unmatched(gdf, setID, nm_to_add, mute = False):
     
 # compare the output data with the existing output from the manual process
 # gdf from match_wd_data_with_taxlot
+# missed_match_ID, missed_gdf: what is missing in the existing matched data
 def compare_data_report(gdf, setID, nm_to_add, export = False):
     unmatched_wd_df = report_unmatched(gdf, setID, nm_to_add, mute = True)
     # unmatched IDs from the run
     missed_ID = unmatched_wd_df.record_ID.unique()
     setgdf = gpd.read_file(os.path.join(inpath, 'GIS', 'Join_Statewide.gdb'), layer=f'WD_{setID}_Combined')
+    setgdf.loc[setgdf.Record_ID.astype(str) != 'nan', 'Record_ID'] = setgdf[setgdf.Record_ID.astype(str) != 'nan'].Record_ID.astype('int64', copy=False)
     matched_rID = gdf.record_ID.unique()
     # missed IDs in the existing data that is not nan
     missed_gdf = setgdf[setgdf.Record_ID.astype(str) != 'nan'][~setgdf.Record_ID.isin(matched_rID)]
-    missedID = missed_gdf.Record_ID.astype('int64', copy=False)
+    missedID = missed_gdf.Record_ID.unique()
     # matched IDs in the existing data that is not nan
     matched_gdf = setgdf[(setgdf.Record_ID.astype(str) != 'nan') & (setgdf.Record_ID.isin(matched_rID))]
     matchedID = matched_gdf.Record_ID.unique()
     missed_match_ID = [ID for ID in list(matched_rID) if ID not in list(matchedID)]
     missed_gdf = gdf[gdf.record_ID.isin(missed_match_ID)]
+    addedID = [ID for ID in list(setgdf.Record_ID.unique()) if ID not in list(matched_rID)]
+    added_gdf = setgdf[setgdf.Record_ID.isin(addedID)]
     if export:
-        missed_gdf[~missed_gdf.geometry.isnull()].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'missed_records_in_{setID}_res.shp'), 
-                                                  driver='ESRI Shapefile')
-    return missed_match_ID, missed_gdf
+        if missed_gdf.shape[0] > 0:
+            selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
+            missed_gdf[~missed_gdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\',
+                                                                           f'missed_records_in_{setID}_res.shp'), 
+                                                              driver='ESRI Shapefile')
+        if added_gdf.shape[0] > 0:
+            added_gdf.rename(columns={'wetdet_delin_number': 'wdID', 
+                      'address_location_desc':'loc_desc', 
+                      'Coord_Source': 'coord_src',
+                      'DocumentName':'doc_name',
+                      'DecisionLink':'doc_link',
+                      'is_batch_file':'isbatfile',
+                      'status_name': 'status_nm',
+                      'received_date':'receiveddt', 
+                      'response_date':'responsedt',
+                      'reissuance_response_date':'reissuance',
+                      'Match_found':'matchfound', 
+                      'Manual_note': 'notes',
+                      'Edits_Complete': 'edits', 
+                      'Shape_Length':'Shp_Length'           
+                      }, inplace=True)
+            added_gdf.to_file(os.path.join(inpath + f'\\{outfolder}\\', f'added_records_in_{setID}_res.shp'), 
+                                                      driver='ESRI Shapefile')
+        
+    return missed_match_ID, missed_gdf, addedID, added_gdf, missed_ID
 
 # get the unmatched records with/without taxlot IDs
 # gdf from match_wd_data_with_taxlot
@@ -401,7 +427,7 @@ def check_corrected_data(df, setID, all_taxlot, nm_to_add, export=False):
         ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
         ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + '\\output\\matched\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')
-    return ndf, cor_df, comIDs, df_wlots_to_checkb
+    return ndf, cor_df, comIDs, df_wlots_to_check
 
 # update match with similar trsqq
 def get_trsqq_list():
