@@ -12,6 +12,8 @@ import datetime
 import string
 import difflib
 import pickle
+import geopy
+from geopy.geocoders import Nominatim
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 wdpath = inpath + '\\DSL data originals'
@@ -20,13 +22,117 @@ yearstart = 2017
 yearend = 2023
 #outfolder = 'test'
 outfolder = 'output\\matched'
-
-# gdf below generally refers to the matched records
 # create a spreadsheet to create a dictionary for the match between county name and code
 cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
-
 # create a dictionary to look up county code
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
+
+################################################ Tier 2 #####################################################
+def get_point_from_lonlat(lon, lat):
+    df = pd.DataFrame([[lon, lat]], columns=['Longitude', 'Latitude'])
+    gdf = gpd.GeoDataFrame(df, crs="EPSG:4326", geometry=gpd.points_from_xy(df.Longitude, df.Latitude))
+    gdf = gdf.to_crs(epsg=2992)
+    return gdf
+
+# point in polygon - WD point in taxtlot
+# require taxtlot
+def extract_taxlot_info(wd_pt, taxlot, year):
+    pip_mask = taxlot.contains(wd_pt.loc[0, 'geometry']) 
+    pip_data = taxlot.loc[pip_mask].copy()
+    pip_data.loc[:, 'YDiff'] = abs(pip_data.year.astype(int) - int(year))
+    ID = pip_data.loc[pip_data.YDiff == np.min(pip_data.YDiff.values), 'ORTaxlot'].values[0]
+    return ID
+
+def get_county_code_from_lonlat(lon, lat):
+    geolocator = Nominatim(user_agent="geoapiExercises")
+    location = geolocator.reverse(str(lat)+","+str(lon))
+    address = location.raw['address']
+    county = address.get('county', '')
+    cnty = county.split(' ')[0]
+    res = str(cnt_dict[cnty]).zfill(2)
+    return res
+
+def separate_numbers_letters(x):
+    numbers = re.findall('\d+', x)
+    letters = re.findall("[a-zA-Z]+", x)
+    return numbers, letters
+
+def find_different_indices(list1, list2):
+    different_indices = []
+    for i, (a, b) in enumerate(zip(list1, list2)):
+        if a != b:
+            different_indices.append(i)
+    return different_indices
+
+def pad_string(string, length=10):
+    if len(string) < length:
+        padded_string = string.ljust(length, '0')
+    else:
+        padded_string = string
+    return padded_string
+
+def combine_lists(list1, list2):
+    combined_list = list(zip(list1, list2))
+    return combined_list
+
+def remove_tuple_format(input_list):
+    output_list = []
+    for item in input_list:
+        if isinstance(item, tuple):
+            output_list.extend(item)
+        else:
+            output_list.append(item)
+    return output_list
+
+def get_list_elements_by_index(input_list, index_list):
+    output_list = [input_list[i] for i in index_list]
+    return output_list
+
+def compare_trsqq(trsqq_to_check, trsqq_to_compare):
+    numbers1, letters1 = separate_numbers_letters(trsqq_to_check[:-2])
+    numbers2, letters2 = separate_numbers_letters(trsqq_to_compare[:-2])
+    letters1.append(trsqq_to_check[-2:])
+    letters2.append(trsqq_to_compare[-2:])
+    trsqq_to_check_lst = remove_tuple_format(combine_lists(numbers1, letters1))
+    trsqq_to_compare_lst = remove_tuple_format(combine_lists(numbers2, letters2))
+    diff_idx = find_different_indices(trsqq_to_check_lst, trsqq_to_compare_lst)
+    if len(diff_idx) != 0:
+        if len(diff_idx) == 1:
+            correct_trsqq_elements = trsqq_to_compare_lst[diff_idx[0]]
+            errors = trsqq_to_check_lst[diff_idx[0]]
+        else:
+            correct_trsqq_elements = get_list_elements_by_index(trsqq_to_compare_lst, diff_idx)
+            errors = get_list_elements_by_index(trsqq_to_check_lst, diff_idx)
+    return diff_idx, correct_trsqq_elements, errors
+
+def join_list_elements(my_list):
+    delimiter1 = ', '
+    delimiter2 = ' and '
+    position1 = 1
+    position2 = -1
+    res = delimiter1.join(my_list[:position1]) + delimiter1 + delimiter1.join(my_list[position1:position2]) + delimiter2 + my_list[position2]
+    return res
+
+trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
+
+def report_trsqq_correction(trsqq_to_check, trsqq_to_compare):
+    diff_idx, correct_trsqq_elements, errors = compare_trsqq(trsqq_to_check, trsqq_to_compare)
+    if len(diff_idx) == 1:
+        res = f'{trsqq_correction_dict[diff_idx[0]]} is corrected from {errors} to {correct_trsqq_elements}'
+    else:
+        keylist = [trsqq_correction_dict.get(key) for key in diff_idx]
+        if len(keylist) == 2:
+            joined_keys = ' and '.join(keylist)
+            joined_errors = ' and '.join(errors)
+            joined_corrections = ' and '.join(correct_trsqq_elements)
+            res = f'{joined_keys} are corrected from {joined_errors} to {joined_corrections} respectively'
+        else:
+            res = f'{join_list_elements(keylist)} are corrected from {join_list_elements(errors)} to {join_list_elements(correct_trsqq_elements)} respectively'
+        return res
+
+
+################################################ Tier 1 #####################################################
+# gdf below generally refers to the matched records
 
 # function to list files or folders
 def list_files(path, folder=False):
@@ -69,9 +175,59 @@ def read_wd_table(setID, file):
     datafile = os.path.join(wdpath, setID, file)
     xl = pd.ExcelFile(datafile)
     wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
+    wd_dt.loc[:, 'county'] = wd_dt.county.apply(lambda x: x.capitalize())
     # this will show the records in the original single table and the ID will be updated when the tables are combined
     wd_dt.loc[:, 'recordID'] = range(1, wd_dt.shape[0] + 1)
     return wd_dt
+
+# get township or range code
+def get_tr_code(x, code='t'):
+    nms = re.findall('\d+', x)
+    if code=='t':
+        nm1 = nms[0]
+    else:
+        nm1 = nms[1]
+    lts = re.findall("[a-zA-Z]+", x)
+    if code=='t':
+        lts2 = lts[0]
+    else:
+        lts2 = lts[1]
+    
+    if len(nm1) == 1:
+        tr1 = '0' + nm1
+    else:
+        tr1 = nm1
+    
+    if ('V' in lts2) or ('Y' in lts2):
+        tr2 = '.50'
+        tr3 = lts2[1]
+    elif('X' in lts2) or ('Z' in lts2):
+        if any([x in lts2 for x in ['XS', 'ZN', 'XE', 'ZW']]):
+            tr2 = '.75'
+        else:
+            tr2 = '.25'
+    else:
+        tr2 = '.00'
+        tr3 = lts2
+
+    res = tr1 + tr2 + tr3
+    return res
+   
+# get section code
+def get_s_code(x):
+    if len(x) <= 7:
+        s = '00'
+    else:
+        nms = re.findall('\d+', x)
+        nm1 = nms[2]
+        if len(nm1) == 1:
+            s = '0' + nm1
+        else:
+            s = nm1
+    return s       
+
+def convert_trsqq(x):
+    return get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + '{:0<10}'.format(x)[8] + '{:0<10}'.format(x)[9]
 
 # wd_dt is from read_wd_table or reorganize_tocheck
 # return reindexed data
@@ -86,29 +242,22 @@ def reindex_data(wd_dt):
     # get county code
     ndf.loc[:, 'cnt_code'] = ndf.county.map(cnt_dict)
     # get OR taxlot IDs for wd data
-    ndf.loc[:, 'ORTaxlot'] = ndf[['cnt_code', 'trsqq', 'lot']].apply(lambda row: str(row.cnt_code).zfill(2) + row.trsqq[0:2] + '.00' + row.trsqq[2:5] + '.00'+ row.trsqq[5:8] + '{:0<10}'.format(row.trsqq)[8] + '{:0<10}'.format(row.trsqq)[9] + '--' + ('000000000' + row.lot)[-9:], axis = 1)
+    ndf.loc[:, 'ORTaxlot'] = ndf[['cnt_code', 'trsqq', 'lot']].apply(lambda row: str(row.cnt_code).zfill(2) + convert_trsqq(row.trsqq) + '--' + ('000000000' + row.lot)[-9:], axis = 1)
     return ndf
 
 # add notes to the wd records
 def make_notes(text):
-    r = re.search('ROW', text)
-    p = re.search('partial|part|p', text)
-    m = re.search('Many|MANY|multiple|many', text)
-    res = None
-    if r and p and m:
-        res = 'ROW & partial & many'
-    elif r and p:
-        res = 'ROW & partial'
-    elif r and m:
-        res = 'ROW & many'
-    elif p and m:
-        res = 'partial & many'
-    elif r:
-        res = 'ROW'
-    elif p:
-        res = 'partial'
-    elif m:
-        res = 'many'    
+    r = re.search('ROW|RR', text, re.IGNORECASE)
+    p = re.search('partial|part|p|portion', text, re.IGNORECASE)
+    m = re.search('Many|multiple|SEVERAL|various', text, re.IGNORECASE)
+    w = re.search('Water', text, re.IGNORECASE)
+    l = re.search('RAIL', text, re.IGNORECASE)
+    res = []
+    for srch, msg in zip([r, p, m, w, l], ['ROW','Partial','Many','Water','Rail']):
+        if srch:
+            #res += msg
+            res.append(msg)
+    res = ', '.join(res)
     return res
 
 # function to clean up wd data by single file
@@ -429,23 +578,100 @@ def check_corrected_data(df, setID, all_taxlot, nm_to_add, export=False):
         ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + '\\output\\matched\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')
     return ndf, cor_df, comIDs, df_wlots_to_check
 
+Tdict = dict(zip(['.25S', '.50S', '.50N', '.75S'], ['Z', 'V', 'Y', 'X']))
+Rdict = dict(zip(['.25E', '.50E', '.50W', '.75E'], ['Z', 'V', 'Y', 'X']))
+def taxlot2trsqq(x):
+    #print(x)
+    rcs = ['.25', '.50', '.75'] # rcs = ratio codes
+    ptns = '.25|.50|.75'
+    if any([c in x for c in rcs]):
+        if (x[4:7] in rcs) and (x[10:13] in rcs):
+            if x[4:7] == x[10:13]:
+                x1 = x.split(x[4:7])
+            else:
+                x0 = x.split(x[4:7])
+                x1 = x0[1].split(x[10:13])
+                x1.insert(0, x0[0]) 
+            tcode = x[4:7] + x1[1][0]
+            rcode = x[10:13] + x1[2][0]
+            p1 = x1[0][2:4] + Tdict[tcode] + x1[1] + Rdict[rcode] + x1[2][0]
+            if x1[2][1:5] == '0000':
+                res = p1
+            elif x1[2][3:5] == '00':
+                res = p1 + x1[2][1:3]
+            elif x1[2][4] == '0':
+                res = p1 + x1[2][1:4]
+            else:
+                res = p1 + x1[2][1:5]
+
+        elif x[4:7] in rcs:
+            x1 = x.split(x[4:7])
+            x2 = x1[1].split('.00')
+            tcode = x[4:7] + x2[0][0]
+            p2 = x1[0][2:4] + Tdict[tcode] + x2[0] + x2[1][0]
+            if x2[1][1:5] == '0000':
+                res = p2
+            elif x2[1][3:5] == '00':
+                res = p2 + x2[1][1:3]
+            elif x2[1][4] == '0':
+                res = p2 + x2[1][1:4]
+            else:
+                res = p2 + x2[1][1:5]
+           
+        elif x[10:13] in rcs:
+            x1 = x.split(x[10:13])
+            x2 = x1[0].split('.00')
+            rcode = x[10:13] + x1[1][0]
+            p3 = x2[0][2:4] + x2[1] + Rdict[rcode] + x1[1][0]
+            if x1[1][1:5] == '0000':
+                res = p3
+            elif x1[1][3:5] == '00':
+                res = p3 + x1[1][1:3]
+            elif x1[1][4] == '0':
+                res = p3 + x1[1][1:4]
+            else:
+                res = p3 + x1[1][1:5]
+                
+    else:
+        p4 = x[2:4] + x[7:10] + x[13]
+        if x[14:18] == '0000':
+            res = p4
+        elif x[16:18] == '00':
+            res = p4 + x[14:16]
+        elif x[17] == '0':
+            res = p4 + x[14:17]
+        else:
+            res = p4 + x[14:18]
+            
+    return res
+    
 # update match with similar trsqq
 def get_trsqq_list():
     with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
         taxlotIDs_to_search = pickle.load(f)
     taxlotIDs_cleaned = unique([txID for txID in taxlotIDs_to_search if len(txID) == 29])
-    trsqq = list(map(lambda x: x[2:4] + x[7:10] + x[13:18], taxlotIDs_cleaned))
+    trsqq = list(map(lambda x: taxlot2trsqq(x), taxlotIDs_cleaned))
     trsqq_dict = dict(zip(trsqq, taxlotIDs_cleaned))
     df = pd.DataFrame({'ORTaxlot':taxlotIDs_cleaned, 'trsqq':trsqq})
+    with open(os.path.join(inpath, "trsqq_list.pkl"), "wb") as f:
+        pickle.dump(trsqq, f)
+    with open(os.path.join(inpath, "trsqq_dict.pkl"), "wb") as f:
+        pickle.dump(trsqq_dict, f)
+    df.to_csv(os.path.join(inpath, "trsqq_df.csv"), index=False)
+    return trsqq, trsqq_dict, df
+
+def read_trsqq():
+    with open(os.path.join(inpath, "trsqq_list.pkl"), "rb") as f:
+        trsqq = pickle.load(f)
+    with open(os.path.join(inpath, "trsqq_dict.pkl"), "rb") as f:
+        trsqq_dict = pickle.load(f) 
+    df = pd.read_csv(os.path.join(inpath, "trsqq_df.csv"))
     return trsqq, trsqq_dict, df
 
 # get the maybe taxlot
 # this is a test function
 def get_maybe_taxlot(trsqq_to_check):
-    res = get_trsqq_list()
-    trsqq = res[0] 
-    trsqq_dict = res[1]
-    df = res[2]
+    trsqq, trsqq_dict, df = read_trsqq()
     closematch = difflib.get_close_matches(trsqq_to_check, trsqq)
     trsqq_matched = unique(closematch)
     checktaxlot = [*map(trsqq_dict.get, trsqq_matched)]
