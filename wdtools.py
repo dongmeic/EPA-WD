@@ -128,7 +128,11 @@ def report_trsqq_correction(trsqq_to_check, trsqq_to_compare):
             res = f'{joined_keys} are corrected from {joined_errors} to {joined_corrections} respectively'
         else:
             res = f'{join_list_elements(keylist)} are corrected from {join_list_elements(errors)} to {join_list_elements(correct_trsqq_elements)} respectively'
-        return res
+        return keylist, res
+
+def get_lot_number_from_taxlot(x):
+    return int(x.split('--')[1])
+
 
 
 ################################################ Tier 1 #####################################################
