@@ -115,20 +115,29 @@ def join_list_elements(my_list):
 
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 
-def report_trsqq_correction(trsqq_to_check, trsqq_to_compare):
+def report_trsqq_correction(trsqq_to_check, trsqq_to_compare, to_correct=False):
     diff_idx, correct_trsqq_elements, errors = compare_trsqq(trsqq_to_check, trsqq_to_compare)
     if len(diff_idx) == 1:
-        res = f'{trsqq_correction_dict[diff_idx[0]]} is corrected from {errors} to {correct_trsqq_elements}'
+        keylist = trsqq_correction_dict[diff_idx[0]]
+        res = f'from {errors} to {correct_trsqq_elements}'
+        if to_correct:
+            return trsqq_to_compare
+        else:
+            return keylist, res
     else:
         keylist = [trsqq_correction_dict.get(key) for key in diff_idx]
         if len(keylist) == 2:
             joined_keys = ' and '.join(keylist)
             joined_errors = ' and '.join(errors)
             joined_corrections = ' and '.join(correct_trsqq_elements)
-            res = f'{joined_keys} are corrected from {joined_errors} to {joined_corrections} respectively'
+            res = f'from {joined_errors} to {joined_corrections}'
         else:
-            res = f'{join_list_elements(keylist)} are corrected from {join_list_elements(errors)} to {join_list_elements(correct_trsqq_elements)} respectively'
-        return keylist, res
+            joined_keys = join_list_elements(keylist)
+            res = f'from {join_list_elements(errors)} to {join_list_elements(correct_trsqq_elements)}'
+        if to_correct:
+            return trsqq_to_compare
+        else:
+            return joined_keys, res
 
 def get_lot_number_from_taxlot(x):
     return int(x.split('--')[1])
