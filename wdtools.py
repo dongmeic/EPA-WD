@@ -163,18 +163,33 @@ def unique(list1):
     return list(np.unique(x))
 
 # function to get all the lot numbers
-def get_lot_numbers(text):
-    # remove parenthesis from text
-    txt = text.replace('(','').replace(')','')
-    # split the text
-    lot_list = re.split(",|, | |-", txt)
-    # remove text elements
-    l = []
-    # in case there are still number-letter strings (e.g., '1a')
-    for t in [lot for lot in lot_list if ~lot.isnumeric()]:
-        if any(c.isdigit() for c in t):
-            l.append(re.sub('\D', '', t))
-    res = unique([lot for lot in lot_list if lot.isnumeric()] + l)
+def get_lot_numbers(x):
+    if type(x) is int:
+        s = str(x)
+        if len(str(x)) > 4:
+            idx = [i for i, char in enumerate(s) if char != '0']
+            lot_list = []
+            for i in range(len(idx)-1):
+                lot_list.append(s[idx[i]:idx[i+1]])
+            lot_list.append(s[idx[len(idx)-1]:])
+            res = lot_list
+        else:
+            res = [s]
+    else:
+        # remove parenthesis from text
+        if '(' in x:
+            txt = x.replace('(','').replace(')','')
+        else:
+            txt = x
+        # split the text
+        lot_list = re.split(",|, | |-", txt)
+        # remove text elements
+        l = []
+        # in case there are still number-letter strings (e.g., '1a')
+        for t in [lot for lot in lot_list if ~lot.isnumeric()]:
+            if any(c.isdigit() for c in t):
+                l.append(re.sub('\D', '', t))
+        res = unique([lot for lot in lot_list if lot.isnumeric()] + l)
     return res
 
 # function to review duplicated records
@@ -246,7 +261,7 @@ def convert_trsqq(x):
 # return reindexed data
 def reindex_data(wd_dt):
     # get a list of lot numbers in each parcel id record
-    wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(str(x)))
+    wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(x))
     # repeat the rows based on the number of lot numbers
     ndf = wd_dt.reindex(wd_dt.index.repeat(wd_dt.lots.str.len()))
     # add the column to list the lot for all
