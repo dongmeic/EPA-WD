@@ -140,9 +140,87 @@ def report_trsqq_correction(trsqq_to_check, trsqq_to_compare, to_correct=False):
             return joined_keys, res
 
 def get_lot_number_from_taxlot(x):
-    return int(x.split('--')[1])
+    if 'ROAD' in x:
+        res = 'ROW'
+    elif 'WATER' in x:
+        res = 'Water'
+    else:
+        res = str(int(x.split('--')[1]))
+    return res
 
+def correct_trsqq(trsqq_to_check, lon, lat, taxlot, year):
+    #print(trsqq_to_check)
+    wd_pt  = get_point_from_lonlat(lon = lon, lat = lat)
+    tID = extract_taxlot_info(wd_pt = wd_pt, taxlot = taxlot, year = year)
+    trsqq, trsqq_dict, df = read_trsqq()
+    trsqq_to_check_c = pad_string(trsqq_to_check)
+    trsqq_to_compare = trsqq_dict[tID]
+    trsqq_to_compare_c = pad_string(trsqq_to_compare)
+    res = report_trsqq_correction(trsqq_to_check_c, trsqq_to_compare_c, to_correct=True)    
+    return res, tID
 
+# this function only works when the coordinates are accurate and one-on-one match among WD ID, trsqq, parcel IDs, and coordinate
+# limitation - one WD record (possible with multiple records with different trasqq and parcel IDs) has only one coordindate
+def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_to_check, lon, lat, taxlot, year):
+        print(f'reviewing {wd_id}')
+        wd_pt  = get_point_from_lonlat(lon = lon, lat = lat)
+        tID = extract_taxlot_info(wd_pt = wd_pt, taxlot = taxlot, year = year)
+        trsqq, trsqq_dict, df = read_trsqq()
+        trsqq_to_check_c = pad_string(trsqq_to_check)
+        lots_to_check = get_lot_numbers(parcel_IDs_to_check)
+        trsqq_to_compare = trsqq_dict[tID]
+        trsqq_to_compare_c = pad_string(trsqq_to_compare)
+        lots_to_compare = df.loc[df.trsqq==trsqq_to_compare, 'ORTaxlot'].values
+        lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))
+        if "away" not in tID:
+            if trsqq_to_compare_c == trsqq_to_check_c:
+                print("trsqq matched, checking county code...")
+                cnty_code = int(get_county_code_from_lonlat(lon, lat))
+                county_to_compare = [key for key, value in cnt_dict.items() if value == cnty_code]
+                # need to check the typos in the county name first
+                if county_to_check == county_to_compare[0]:
+                    print("county code is corrected, need to check lot numbers...")
+                    if any([x not in lots_to_compare for x in lots_to_check]):
+                        lots_to_correct = [x for x in lots_to_check if x not in lots_to_compare]
+                        cor_type, cor_notes = "lot number", f'lot number {lots_to_correct} might be incorrect'
+                        print("lot numbers might be wrong...")
+                    else:
+                        notes = 'lot numbers seem to be correct, need to review'
+                        print(notes)
+                        cor_type, cor_notes = None, notes
+                else:
+                    cor_type, cor_notes = "county", f'from {county_to_check} to {county_to_compare}'
+                    print("corrected county...")
+            else:
+                # check the lot numbers
+                lots_matched = [x for x in lots_to_check if x in lots_to_compare]
+                if len(lots_matched) > 0:
+                    if len(lots_matched) == len(lots_to_check):
+                        print("all lots are matched...")
+                        cor_type, cor_notes = report_trsqq_correction(trsqq_to_check_c, trsqq_to_compare_c)
+                        print("corrected trsqq...")
+                    else:
+                        notes = f"some lots are not matched, need to review trsqq, the close-match is {trsqq_to_compare}"
+                        print(notes)
+                        print(f"lots to check: {lots_to_check}, and lots to compare: {lots_to_compare}")
+                        cor_type, cor_notes = "to review", notes
+                else:
+                    notes = f"there is not any matched lot, need to review trsqq, the close-match is {trsqq_to_compare}"
+                    print(notes)
+                    print(f"lots to check: {lots_to_check}, and lots to compare: {lots_to_compare}")
+                    cor_type, cor_notes = "to review", notes
+        else:
+            cor_type, cor_notes = "coordinate", f'coordinate might be incorrect, nearby taxlot is {tID}'
+        return cor_type, cor_notes
+
+def generate_taxlot_output(df, taxlot, setID, export=False):
+    df['pairs'] = list(zip(df['IDyear'].astype(str), df['ORTaxlot']))
+    taxlots_to_review = taxlot[taxlot[['year', 'ORTaxlot']].apply(tuple, axis=1).isin(df.pairs.values)]
+    taxlots_to_review_2 = taxlots_to_review.merge(df, on='ORTaxlot')
+    taxlots_to_review_2.drop(columns=['pairs'], inplace=True)
+    if export:
+        taxlots_to_review_2.to_file(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2.shp'))
+    return taxlots_to_review_2
 
 ################################################ Tier 1 #####################################################
 # gdf below generally refers to the matched records
@@ -164,9 +242,11 @@ def unique(list1):
 
 # function to get all the lot numbers
 def get_lot_numbers(x):
-    if type(x) is int:
+    if x is None:
+        res = None
+    elif type(x) is int:
         s = str(x)
-        if len(str(x)) > 4:
+        if len(str(x)) > 5:
             idx = [i for i, char in enumerate(s) if char != '0']
             lot_list = []
             for i in range(len(idx)-1):
@@ -177,12 +257,19 @@ def get_lot_numbers(x):
             res = [s]
     else:
         # remove parenthesis from text
-        if '(' in x:
+        if '(' in str(x):
             txt = x.replace('(','').replace(')','')
         else:
-            txt = x
+            txt = str(x)
         # split the text
-        lot_list = re.split(",|, | |-", txt)
+        lot_list = []
+        for r in re.split(",|, | ", txt):
+            if '-' in r:
+                start, end = r.split('-')
+                lot_list += list(range(int(start), int(end)+1))
+                lot_list = list(map(lambda x: str(x), lot_list))
+            else:
+                lot_list.append(r)
         # remove text elements
         l = []
         # in case there are still number-letter strings (e.g., '1a')
