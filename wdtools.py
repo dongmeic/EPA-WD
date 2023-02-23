@@ -612,7 +612,7 @@ def combined_reindexed_data(setID, nm_to_add):
 # df is reindexed from combined_reindexed_data
 # return geodata with matched geometry
 # run this to include only the matched records with the original ID
-def match_wd_data_with_taxlot(df, setID, all_taxlot, nm_to_add, export=False):
+def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False):
     with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
         all_txid = pickle.load(f)
     tocheck_txid = df.ORTaxlot.unique()
@@ -638,8 +638,12 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, nm_to_add, export=False):
                       'reissuance_response_date':'reissuance' 
                       }, inplace=True)
         ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
-    if export: 
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
+    if update:
+        matched = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'))
+        ngdf = matched.append(ngdf[selcols], ignore_index = True)
+    if export: 
+        # the update will overwrite the first output
         ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
                                                   driver='ESRI Shapefile')  
     return ngdf
