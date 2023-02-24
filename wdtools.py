@@ -28,19 +28,27 @@ cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 
 ################################################ Tier 2 #####################################################
-def get_point_from_lonlat(lon, lat):
+def get_point_from_lonlat(lon, lat, export=True):
     df = pd.DataFrame([[lon, lat]], columns=['Longitude', 'Latitude'])
     gdf = gpd.GeoDataFrame(df, crs="EPSG:4326", geometry=gpd.points_from_xy(df.Longitude, df.Latitude))
     gdf = gdf.to_crs(epsg=2992)
+    if export:
+        gdf.to_file(r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\test\point.shp')
     return gdf
 
 # point in polygon - WD point in taxtlot
 # require taxtlot
 def extract_taxlot_info(wd_pt, taxlot, year):
-    pip_mask = taxlot.contains(wd_pt.loc[0, 'geometry']) 
-    pip_data = taxlot.loc[pip_mask].copy()
+    pip_mask = taxlot.contains(wd_pt.loc[0, 'geometry'])
+    if any(pip_mask):
+        pip_data = taxlot.loc[pip_mask].copy()
+    else:
+        pip_data = gpd.sjoin_nearest(wd_pt, taxlot, distance_col='dist')
     pip_data.loc[:, 'YDiff'] = abs(pip_data.year.astype(int) - int(year))
     ID = pip_data.loc[pip_data.YDiff == np.min(pip_data.YDiff.values), 'ORTaxlot'].values[0]
+    if not any(pip_mask):
+        dist = pip_data.loc[pip_data.YDiff == np.min(pip_data.YDiff.values), 'dist'].values[0]
+        ID = ID + f', about {int(dist+0.5)} ft away'
     return ID
 
 def get_county_code_from_lonlat(lon, lat):
@@ -143,9 +151,11 @@ def report_trsqq_correction(trsqq_to_check, trsqq_to_compare, to_correct=False):
 
 def get_lot_number_from_taxlot(x):
     if 'ROAD' in x:
-        res = 'ROW'
+        res = 'ROADS'
     elif 'WATER' in x:
-        res = 'Water'
+        res = 'WATER'
+    elif 'RAIL' in x:
+        res = 'RAILS'
     else:
         res = str(int(x.split('--')[1]))
     return res
@@ -167,14 +177,14 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
         print(f'reviewing {wd_id}')
         wd_pt  = get_point_from_lonlat(lon = lon, lat = lat)
         tID = extract_taxlot_info(wd_pt = wd_pt, taxlot = taxlot, year = year)
-        trsqq, trsqq_dict, df = read_trsqq()
-        trsqq_to_check_c = pad_string(trsqq_to_check)
-        lots_to_check = get_lot_numbers(parcel_IDs_to_check)
-        trsqq_to_compare = trsqq_dict[tID]
-        trsqq_to_compare_c = pad_string(trsqq_to_compare)
-        lots_to_compare = df.loc[df.trsqq==trsqq_to_compare, 'ORTaxlot'].values
-        lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))
         if "away" not in tID:
+            trsqq_dict, df = read_trsqq()[1:3]
+            trsqq_to_check_c = pad_string(trsqq_to_check)
+            lots_to_check = get_lot_numbers(parcel_IDs_to_check)
+            trsqq_to_compare = trsqq_dict[tID]
+            trsqq_to_compare_c = pad_string(trsqq_to_compare)
+            lots_to_compare = df.loc[df.trsqq==trsqq_to_compare, 'ORTaxlot'].values
+            lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))  
             if trsqq_to_compare_c == trsqq_to_check_c:
                 print("trsqq matched, checking county code...")
                 cnty_code = int(get_county_code_from_lonlat(lon, lat))
@@ -212,31 +222,36 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
                     print(f"lots to check: {lots_to_check}, and lots to compare: {lots_to_compare}")
                     cor_type, cor_notes = "to review", notes
         else:
-            cor_type, cor_notes = "coordinate", f'coordinate might be incorrect, nearby taxlot is {tID}'
+            notes = f'coordinate might be incorrect, nearby taxlot is {tID}'
+            print(notes)
+            cor_type, cor_notes = "coordinate", notes
         return cor_type, cor_notes
 
-# df is the second output from split_unmatched_df
-def generate_taxlot_output(df, taxlot, setID, export=False):
-    df['pairs'] = list(zip(df['IDyear'].astype(str), df['ORTaxlot']))
-    taxlots_to_review = taxlot[taxlot[['year', 'ORTaxlot']].apply(tuple, axis=1).isin(df.pairs.values)]
-    taxlots_to_review_2 = taxlots_to_review.merge(df, on='ORTaxlot')
-    taxlots_to_review_2.drop(columns=['pairs'], inplace=True)
-    if export:
-        taxlots_to_review_2.to_file(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2.shp'))
-    return taxlots_to_review_2
-
 # df is the output from report_unmatched
-def split_unmatched_df(df):
-    df = df[df.missinglot == 'N']
+def split_unmatched_df(df, ml, setID, export=True):
+    df = df[df.missinglot == ml]
     IDcol = 'wetdet_delin_number'
     value_counts = df[IDcol].value_counts()
     r1_df = df[df[IDcol].isin(value_counts[value_counts > 1].index)]
     r2_df = df[df[IDcol].isin(value_counts[value_counts == 1].index)]
     r2_df = r2_df[((r2_df.latitude.astype(str) != 'nan')|(r2_df.longitude.astype(str) != 'nan'))]
+    if export:
+        r1_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r1_{ml}.csv'), index=False)
+        r2_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_{ml}.csv'), index=False)
     return r1_df, r2_df
 
 # df is the second output from split_unmatched_df
-def review_unmatched_df_r2(df, taxlot, setID, export=False):
+def generate_taxlot_output(df, taxlot, setID, ml, export=False):
+    df['pairs'] = list(zip(df['IDyear'].astype(str), df['ORTaxlot']))
+    taxlots_to_review = taxlot[taxlot[['year', 'ORTaxlot']].apply(tuple, axis=1).isin(df.pairs.values)]
+    taxlots_to_review_2 = taxlots_to_review.merge(df, on='ORTaxlot')
+    taxlots_to_review_2.drop(columns=['pairs'], inplace=True)
+    if export:
+        taxlots_to_review_2.to_file(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}.shp'))
+    return taxlots_to_review_2
+
+# df is the second output from split_unmatched_df
+def review_unmatched_df_r2(df, taxlot, setID, ml, export=False):
     outdf = df[['wetdet_delin_number', 'trsqq', 'parcel_id', 'county', 'latitude', 'longitude', 'DecisionLink', 'record_ID', 'IDyear']]
     outdf.loc[:,'correct_type'], outdf.loc[:,'correction'] = zip(*outdf.apply(lambda row: review_wd_record_w_coord(wd_id = row.wetdet_delin_number, 
                                                                         county_to_check = row.county, 
@@ -246,14 +261,14 @@ def review_unmatched_df_r2(df, taxlot, setID, export=False):
                                                                         lat = row.latitude, 
                                                                         taxlot = taxlot, 
                                                                         year = row.IDyear), axis = 1))
-    sel = ~outdf.correct_type.isin(['county', 'lot number', 'coordinate'])
+    sel = ~outdf.correct_type.isin(['county', 'lot number', 'coordinate', None])
     outdf.loc[sel, 'cor_trsqq'], outdf.loc[sel, 'ORTaxlot'] = zip(*outdf.loc[sel,:].apply(lambda row: correct_trsqq(trsqq_to_check = row.trsqq, 
                                                                                lon = row.longitude,
                                                                                lat = row.latitude,
                                                                                taxlot = taxlot,
                                                                                year = row.IDyear), axis = 1))
     if export:
-        outdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_0.csv'), index=False)
+        outdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_0.csv'), index=False)
     return outdf
 
 trsqq_cor_dict = {'township number': 0, 
@@ -268,8 +283,8 @@ def replace_str_index(text,index=0,replacement=''):
 
 # df is the output from split_unmatched_df
 # need to run review_unmatched_df_r2 and do some manual review work first to get the notes
-def correct_unmatched(df, setID, s='r1', export=True):
-    notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_{s}_notes.csv'))
+def correct_unmatched(df, setID, s, ml, export=True):
+    notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_{s}_{ml}_notes.csv'))
     df = df.copy()[df.wetdet_delin_number.isin(notes.wetdet_delin_number.unique())]
     for wdID in df.wetdet_delin_number.unique():
         sel = df.wetdet_delin_number == wdID
@@ -279,7 +294,6 @@ def correct_unmatched(df, setID, s='r1', export=True):
             k = notes[sel2].shape[0]
             if k > 1:
                 df.loc[sel, field] = df[sel][field].apply(lambda x: pad_string(x))
-                trsqq_to_check = df[sel][field].unique()[0]
                 cor_types = notes.loc[sel2, 'cor_type'].values
                 for cor_type in cor_types:
                     sel3 = (notes.wetdet_delin_number==wdID) & (notes.field==field) & (notes.cor_type==cor_type)
@@ -287,38 +301,41 @@ def correct_unmatched(df, setID, s='r1', export=True):
                     df.loc[sel, field] = df[sel][field].apply(lambda x: replace_str_index(x,
                                                                                           index=ind,
                                                                                           replacement=notes.loc[sel3, 'to'].values[0]))
-
-        else:
-            df.loc[sel, field] = df[sel][field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
-                                                                          notes.loc[sel2, 'to'].values[0]))
+            else:
+                to = notes.loc[sel2, 'to'].values[0]
+                if to.isdigit():
+                    to = to.zfill(2)
+                df.loc[sel, field] = df[sel][field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
+                                                                            to))
     if export:
-        df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{s}_1.csv'), index=False)
+        df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{s}_{ml}_1.csv'), index=False)
     return df
 
 # need to run review_unmatched_df_r2 and do some manual work frist
 # rev_df is the output from review_unmatched_df_r2, nt_df is from manual input
 # df is the second output from split_unmatched_df
-def update_unmatched_df_r2(df, setID, export=True):
-    rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_0.csv'))
-    nt_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_notes.csv'))
+# this is a parallel run with correct_unmatched for r2_df
+def update_unmatched_df_r2(df, setID, ml, export=True):
+    rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_0.csv'))
+    nt_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_{ml}_notes.csv'))
     df = df.copy()[~df.wetdet_delin_number.isin(nt_df.wetdet_delin_number.unique())]
     rev_df = rev_df.copy()[~rev_df.wetdet_delin_number.isin(nt_df.wetdet_delin_number.unique())]
     rev_df = rev_df[['wetdet_delin_number', 'cor_trsqq']]
     ndf = df.merge(rev_df, on='wetdet_delin_number')
-    ndf.loc[:, 'trsqq'] = ndf.loc[:, 'cor_trsqq']
+    ndf.loc[:, 'trsqq'] = ndf.loc[:, 'cor_trsqq'].apply(lambda x: x.rstrip('0'))
     ndf.drop(columns='cor_trsqq', inplace=True)
-    rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_1.csv'))
+    rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_1.csv'))
     rdf = ndf.append(rev_df, ignore_index = True)
     if export:
-        rdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_2.csv'), index=False)
+        rdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'), index=False)
     return rdf
 
-def combine_corrected_unmatched(setID, export=True):
-    rev_df1 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r1_1.csv'))
-    rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_2.csv'))
+def combine_corrected_unmatched(setID,ml,export=True):
+    rev_df1 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r1_{ml}_1.csv'))
+    rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'))
     df = rev_df1.append(rev_df2, ignore_index = True)
     if export:
-        df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}.csv'), index=False)
+        df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{ml}.csv'), index=False)
     return df
 
 
@@ -341,6 +358,7 @@ def unique(list1):
     return list(np.unique(x))
 
 # function to get all the lot numbers
+# x is parcel_id
 def get_lot_numbers(x):
     if x is None:
         res = None
@@ -377,6 +395,13 @@ def get_lot_numbers(x):
             if any(c.isdigit() for c in t):
                 l.append(re.sub('\D', '', t))
         res = unique([lot for lot in lot_list if lot.isnumeric()] + l)
+        r = re.search('ROW|RR', x, re.IGNORECASE)
+        w = re.search('Water', x, re.IGNORECASE)
+        l = re.search('RAIL', x, re.IGNORECASE)
+        for srch, msg in zip([r, w, l], ['ROADS','WATER','RAILS']):
+            if srch:
+                #res += msg
+                res.append(msg)
     return res
 
 # function to review duplicated records
@@ -442,7 +467,9 @@ def get_s_code(x):
     return s       
 
 def convert_trsqq(x):
-    return get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + '{:0<10}'.format(x)[8] + '{:0<10}'.format(x)[9]
+    s = re.sub("V|X|Y|Z", "", x)
+    xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + '{:0<10}'.format(s)[8] + '{:0<10}'.format(s)[9]
+    return xt[:16]
 
 # wd_dt is from read_wd_table or reorganize_tocheck
 # return reindexed data
@@ -612,6 +639,7 @@ def combined_reindexed_data(setID, nm_to_add):
 # df is reindexed from combined_reindexed_data
 # return geodata with matched geometry
 # run this to include only the matched records with the original ID
+# make sure the matched_records_{setID}.shp is not the updated version from a previous run when update is true
 def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False):
     with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
         all_txid = pickle.load(f)
