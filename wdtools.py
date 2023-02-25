@@ -33,7 +33,7 @@ def get_point_from_lonlat(lon, lat, export=True):
     gdf = gpd.GeoDataFrame(df, crs="EPSG:4326", geometry=gpd.points_from_xy(df.Longitude, df.Latitude))
     gdf = gdf.to_crs(epsg=2992)
     if export:
-        gdf.to_file(r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\test\point.shp')
+        gdf.to_file(inpath + '\\test\point.shp')
     return gdf
 
 # point in polygon - WD point in taxtlot
@@ -194,7 +194,7 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
                     print("county code is corrected, need to check lot numbers...")
                     if any([x not in lots_to_compare for x in lots_to_check]):
                         lots_to_correct = [x for x in lots_to_check if x not in lots_to_compare]
-                        cor_type, cor_notes = "lot number", f'lot number {lots_to_correct} might be incorrect'
+                        cor_type, cor_notes = "lot number", f'lot number {lots_to_correct} might be incorrect, the matched taxlot is {tID} for {trsqq_to_compare}'
                         print("lot numbers might be wrong...")
                     else:
                         notes = 'lot numbers seem to be correct, need to review'
@@ -250,9 +250,19 @@ def generate_taxlot_output(df, taxlot, setID, ml, export=False):
         taxlots_to_review_2.to_file(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}.shp'))
     return taxlots_to_review_2
 
+def taxlot_from_coord(x):
+    txid = x.split('the matched taxlot is ')[1].split(' for ')[0]
+    trsqq = x.split(' for ')[1]
+    return trsqq, txid
+
+def trsqq_from_nearby_taxlot(x):
+    txid = x.split(', about')[0].replace('coordinate might be incorrect, nearby taxlot is ', '')
+    trsqq_dict = read_trsqq()[1]
+    return trsqq_dict[txid], txid
+
 # df is the second output from split_unmatched_df
-def review_unmatched_df_r2(df, taxlot, setID, ml, export=False):
-    outdf = df[['wetdet_delin_number', 'trsqq', 'parcel_id', 'county', 'latitude', 'longitude', 'DecisionLink', 'record_ID', 'IDyear']]
+def review_unmatched_df_r2(df, taxlot, setID, ml, export=True):
+    outdf = df.copy()[['wetdet_delin_number', 'trsqq', 'parcel_id', 'county', 'latitude', 'longitude', 'DecisionLink', 'record_ID', 'IDyear']]
     outdf.loc[:,'correct_type'], outdf.loc[:,'correction'] = zip(*outdf.apply(lambda row: review_wd_record_w_coord(wd_id = row.wetdet_delin_number, 
                                                                         county_to_check = row.county, 
                                                                         trsqq_to_check = row.trsqq, 
@@ -267,6 +277,14 @@ def review_unmatched_df_r2(df, taxlot, setID, ml, export=False):
                                                                                lat = row.latitude,
                                                                                taxlot = taxlot,
                                                                                year = row.IDyear), axis = 1))
+    if 'lot number' in outdf.correct_type.unique():
+        sel1 = outdf.correct_type=='lot number'
+        outdf.loc[sel1, 'cor_trsqq'], outdf.loc[sel1, 'ORTaxlot'] = zip(*outdf.loc[sel1, 'correction'].apply(lambda x: taxlot_from_coord(x)))
+    
+    if 'coordinate' in outdf.correct_type.unique():
+        sel2 = outdf.correct_type=='coordinate'
+        outdf.loc[sel2, 'cor_trsqq'], outdf.loc[sel2, 'ORTaxlot'] = zip(*outdf.loc[sel2, 'correction'].apply(lambda x: trsqq_from_nearby_taxlot(x)))
+
     if export:
         outdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_0.csv'), index=False)
     return outdf
@@ -293,19 +311,19 @@ def correct_unmatched(df, setID, s, ml, export=True):
             sel2 = (notes.wetdet_delin_number==wdID) & (notes.field==field)
             k = notes[sel2].shape[0]
             if k > 1:
-                df.loc[sel, field] = df[sel][field].apply(lambda x: pad_string(x))
+                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
                 cor_types = notes.loc[sel2, 'cor_type'].values
                 for cor_type in cor_types:
                     sel3 = (notes.wetdet_delin_number==wdID) & (notes.field==field) & (notes.cor_type==cor_type)
                     ind = trsqq_cor_dict[cor_type]
-                    df.loc[sel, field] = df[sel][field].apply(lambda x: replace_str_index(x,
+                    df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x,
                                                                                           index=ind,
                                                                                           replacement=notes.loc[sel3, 'to'].values[0]))
             else:
                 to = notes.loc[sel2, 'to'].values[0]
                 if to.isdigit():
                     to = to.zfill(2)
-                df.loc[sel, field] = df[sel][field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
+                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
                                                                             to))
     if export:
         df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{s}_{ml}_1.csv'), index=False)
@@ -337,6 +355,25 @@ def combine_corrected_unmatched(setID,ml,export=True):
     if export:
         df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{ml}.csv'), index=False)
     return df
+
+def review_WD_record_via_Pro(gdf, wdID):
+    gdf = gdf[gdf.wdID == wdID]
+    gdf.to_file(os.path.join(inpath, 'output', 'wd_shp', wdID + '.shp'))
+    return gdf
+
+# df is the output from review_unmatched_df_r2
+# make sure ORTaxlot is in the right format from df
+def get_taxlot_to_check_r2(revdf, taxlot, setID, ml):
+    df = revdf.copy()
+    df['pairs'] = list(zip(df['IDyear'].astype(str), df['ORTaxlot']))
+    taxlots_to_review = taxlot[taxlot[['year', 'ORTaxlot']].apply(tuple, axis=1).isin(df.pairs.values)]
+    taxlots_to_review_2 = taxlots_to_review.merge(df, on='ORTaxlot')
+    taxlots_to_review_2.drop(columns=['pairs'], inplace=True)
+    taxlots_to_review_2.rename(columns={'wetdet_delin_number': 'wdID', 
+                      'DecisionLink':'doc_link',
+                      'correct_type':'cor_type'}, inplace=True)
+    taxlots_to_review_2.to_file(os.path.join(inpath, 'output', 'to_review', f'review_unmatched_{setID}_r2_{ml}.shp'))
+    return taxlots_to_review_2
 
 
 ################################################ Tier 1 #####################################################
