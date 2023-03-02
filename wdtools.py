@@ -375,6 +375,8 @@ def get_taxlot_to_check_r2(revdf, taxlot, setID, ml):
     taxlots_to_review_2.to_file(os.path.join(inpath, 'output', 'to_review', f'review_unmatched_{setID}_r2_{ml}.shp'))
     return taxlots_to_review_2
 
+def adjust_taxlot(x, from_, to_):
+    return x.replace(from_, to_)
 
 ################################################ Tier 1 #####################################################
 # gdf below generally refers to the matched records
