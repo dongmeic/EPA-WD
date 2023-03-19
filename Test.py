@@ -1,0 +1,1 @@
+# write a function to separate numbers and letters and return the two lists
