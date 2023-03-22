@@ -14,6 +14,10 @@ import difflib
 import pickle
 import geopy
 from geopy.geocoders import Nominatim
+from urllib.request import urlopen
+import io
+import requests
+from PyPDF2 import PdfFileReader, PdfFileWriter
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 wdpath = inpath + '\\DSL data originals'
@@ -26,6 +30,93 @@ outfolder = 'output\\matched'
 cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
 # create a dictionary to look up county code
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
+
+revpath = inpath + '\GIS\ArcGIS Pro Project\DataReview\DataReview.gdb'
+pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
+
+################################################ Tier 3 & 4 #####################################################
+
+def check_completeness(setID='003', a=3):
+    partial = gpd.read_file(revpath, layer=f'Set{setID}_partial')
+    mapped1 = list(partial.wdID.unique())
+    mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'Set{setID}_wo_lot', f'Set{setID}_partial']) and ('L' not in lyr)]
+    mapped2 = list(map(lambda x: x.replace('_', '-'), mapped0))
+    mapped = mapped1 + mapped2
+    matched = gpd.read_file(inpath + f'\\output\matched\matched_records_Set{setID}_edited.shp')
+    pct = (len(mapped)+a)/len(matched[~matched.notes.isnull()].wdID.unique())
+    print(f'{round(pct*100, 1)}% completed...')
+    return sorted(mapped), len(mapped)
+
+def extract_page_from_locPath(filePath, pageNm, wdID):
+    pdf_file = PdfFileReader(filePath)
+    pageObj = pdf_file.getPage(pageNm)
+    pdf_writer = PdfFileWriter()
+    pdf_writer.addPage(pageObj)
+    output = f'{pdf_outpath}\\{wdID}_{pageNm+1}.pdf'
+    with open(output, 'wb') as output_pdf:
+        pdf_writer.write(output_pdf) 
+
+def extract_page_from_docLink(url, pageNm, wdID):
+    response = requests.get(url=url, timeout=120)
+    on_fly_mem_obj = io.BytesIO(response.content)
+    pdf_file = PdfFileReader(on_fly_mem_obj)
+    pageObj = pdf_file.getPage(pageNm)
+    pdf_writer = PdfFileWriter()
+    pdf_writer.addPage(pageObj)
+    output = f'{pdf_outpath}\\{wdID}_{pageNm+1}.pdf'
+    with open(output, 'wb') as output_pdf:
+        pdf_writer.write(output_pdf) 
+
+def review_mapped(setID):
+    mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
+    for wID in mapped0:
+        gdf = gpd.read_file(revpath, layer=wID)
+        if 'wdID' in gdf.columns:
+            if len(gdf.wdID.unique()) > 1:
+                print(wID)
+
+def revise_single_partial_file(wID):
+    gdf = gpd.read_file(revpath, layer=wID)
+    selcols = ['Shape_Length', 'Shape_Area']
+    if 'wdID' in gdf.columns:
+        df = gdf.copy()[selcols +  ['wdID']]
+    else:
+        df = gdf.copy()[selcols]
+        df.loc[:,'wdID'] = wID.replace('_', '-')
+    df.loc[:,'geometry'] = gdf.loc[:,'geometry']
+    return df
+
+def merge_single_partial_file(wIDlist):
+    df = pd.DataFrame()
+    for wID in wIDlist:
+        df=pd.concat([df, revise_single_partial_file(wID)], ignore_index=True)
+    gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
+    return gdf
+
+def combine_matched_digitized(setID, editedIDs, nm_to_add):
+    mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
+    matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
+    partial = gpd.read_file(revpath, layer=f'{setID}_partial')
+    gdf = merge_single_partial_file(mapped0)
+    dat = gdf.append(partial, ignore_index=True)
+    edited_gdf = matched[matched.wdID.isin(editedIDs)]
+    edited_gdf = edited_gdf[['wdID', 'geometry']].dissolve('wdID')
+    edited_gdf.loc[:, 'wdID'] = edited_gdf.index
+    data1 = edited_gdf.append(dat[['wdID', 'geometry']], ignore_index=True)
+    matched_df = matched[['wdID', 'geometry']].dissolve('wdID')
+    matched_df.loc[:, 'wdID'] = matched_df.index
+    excluded = [wdID for wdID in data1.wdID.unique() if wdID in matched_df.wdID.unique()]
+    issues = pd.read_csv(os.path.join(inpath, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
+    issueIDs = list(issues.wetdet_delin_number.unique())
+    matched_gdf = matched_df[~matched_df.wdID.isin(excluded+issueIDs)]
+    data2 = matched_gdf.append(data1, ignore_index=True)
+    wo_lot = gpd.read_file(revpath, layer=f'{setID}_wo_lot')
+    wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
+    df = wd[wd.record_ID.isin(wo_lot.record_ID)][['wetdet_delin_number', 'record_ID']]
+    df.rename(columns={'wetdet_delin_number': 'wdID'}, inplace=True)
+    wo_lot = wo_lot.merge(df, on='record_ID')
+    data3 = data2.append(wo_lot[['wdID', 'geometry']], ignore_index=True)
+    return data3, issueIDs
 
 ################################################ Tier 2 #####################################################
 def get_point_from_lonlat(lon, lat, export=True):
