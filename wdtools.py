@@ -93,6 +93,7 @@ def merge_single_partial_file(wIDlist):
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
 
+# require the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
 def combine_matched_digitized(setID, editedIDs, nm_to_add):
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
@@ -112,11 +113,10 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add):
     data2 = matched_gdf.append(data1, ignore_index=True)
     wo_lot = gpd.read_file(revpath, layer=f'{setID}_wo_lot')
     wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
-    df = wd[wd.record_ID.isin(wo_lot.record_ID)][['wetdet_delin_number', 'record_ID']]
-    df.rename(columns={'wetdet_delin_number': 'wdID'}, inplace=True)
-    wo_lot = wo_lot.merge(df, on='record_ID')
     data3 = data2.append(wo_lot[['wdID', 'geometry']], ignore_index=True)
-    return data3, issueIDs
+    unmatchedIDs = [wdID for wdID in wd.wetdet_delin_number.unique() if wdID not in data3.wdID.unique()]
+    toCheck = [ID for ID in unmatchedIDs if ID not in issueIDs]
+    return data3, toCheck
 
 ################################################ Tier 2 #####################################################
 def get_point_from_lonlat(lon, lat, export=True):
