@@ -18,11 +18,13 @@ from urllib.request import urlopen
 import io
 import requests
 from PyPDF2 import PdfFileReader, PdfFileWriter
+import webbrowser
+import time
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 wdpath = inpath + '\\DSL data originals'
 txpath = inpath + '\\GIS\ORMAP_data\ORMAP_Taxlot_Years'
-yearstart = 2017
+yearstart = 2016
 yearend = 2023
 #outfolder = 'test'
 outfolder = 'output\\matched'
@@ -35,6 +37,48 @@ revpath = inpath + '\GIS\ArcGIS Pro Project\DataReview\DataReview.gdb'
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
 
 ################################################ Tier 3 & 4 #####################################################
+def review_loop_r1(df):
+    for wdID in df.wetdet_delin_number.unique():
+        print(wdID)
+        print(check_unmatched_r1(wdID = wdID, df = df))
+        user_input = input("Press 'p' to pause or any other key to continue...")
+        if user_input == 'p':
+            while True:
+                user_input = input("Press 'c' to continue...")
+                if user_input == 'c':
+                    break
+        time.sleep(1) # wait for 1 second between iterations
+
+def check_unmatched_r1(wdID, df):
+    url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
+    selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes']
+    if str(url) == 'nan':
+        print('Decision link is not available')
+    else:
+        webbrowser.open(url)
+    return df.loc[df.wetdet_delin_number == wdID, selcols]
+
+def review_loop(df):
+    df = df.reset_index()
+    for i in range(df.shape[0]):
+        wdID = df.loc[i, 'wetdet_delin_number']
+        print(wdID)
+        print(check_review_notes_r2n(wdID = wdID, df = df))
+        user_input = input("Press 'p' to pause or any other key to continue...")
+        if user_input == 'p':
+            while True:
+                user_input = input("Press 'c' to continue...")
+                if user_input == 'c':
+                    break
+        time.sleep(1) # wait for 1 second between iterations
+
+def check_review_notes_r2n(wdID, df):
+    url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
+    if str(url) == 'nan':
+        print('Decision link is not available')
+    else:
+        webbrowser.open(url)
+    return df.loc[df.wetdet_delin_number == wdID, ['correct_type', 'correction', 'cor_trsqq']]
 
 def check_completeness(setID='003', a=3):
     partial = gpd.read_file(revpath, layer=f'Set{setID}_partial')
@@ -240,6 +284,13 @@ def report_trsqq_correction(trsqq_to_check, trsqq_to_compare, to_correct=False):
         else:
             return joined_keys, res
 
+def has_letter(string):
+    """
+    Checks if a string contains any letter.
+    Returns True if the string contains at least one letter, False otherwise.
+    """
+    return any(char.isalpha() for char in string)
+
 def get_lot_number_from_taxlot(x):
     if 'ROAD' in x:
         res = 'ROADS'
@@ -248,7 +299,11 @@ def get_lot_number_from_taxlot(x):
     elif 'RAIL' in x:
         res = 'RAILS'
     else:
-        res = str(int(x.split('--')[1]))
+        lot = x.split('--')[1]
+        if has_letter(lot):
+            res = lot
+        else:
+            res = str(int(lot))
     return res
 
 def correct_trsqq(trsqq_to_check, lon, lat, taxlot, year):
@@ -392,30 +447,57 @@ def replace_str_index(text,index=0,replacement=''):
 
 # df is the output from split_unmatched_df
 # need to run review_unmatched_df_r2 and do some manual review work first to get the notes
+# the document to review is review_unmatched_Set00?_r2_N_0.csv
 def correct_unmatched(df, setID, s, ml, export=True):
     notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_{s}_{ml}_notes.csv'))
+    rID = 'record_ID' in notes.columns
     df = df.copy()[df.wetdet_delin_number.isin(notes.wetdet_delin_number.unique())]
     for wdID in df.wetdet_delin_number.unique():
-        sel = df.wetdet_delin_number == wdID
-        fields = notes.loc[notes.wetdet_delin_number == wdID, 'field'].unique()
-        for field in fields:
-            sel2 = (notes.wetdet_delin_number==wdID) & (notes.field==field)
-            k = notes[sel2].shape[0]
-            if k > 1:
-                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
-                cor_types = notes.loc[sel2, 'cor_type'].values
-                for cor_type in cor_types:
-                    sel3 = (notes.wetdet_delin_number==wdID) & (notes.field==field) & (notes.cor_type==cor_type)
-                    ind = trsqq_cor_dict[cor_type]
-                    df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x,
-                                                                                          index=ind,
-                                                                                          replacement=notes.loc[sel3, 'to'].values[0]))
-            else:
-                to = notes.loc[sel2, 'to'].values[0]
-                if to.isdigit():
-                    to = to.zfill(2)
-                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
-                                                                            to))
+        
+        if rID:
+            for r_id in notes[notes.wetdet_delin_number == wdID]['record_ID'].unique():
+                sel = (df.wetdet_delin_number == wdID) & (df.record_ID == r_id)
+                sel1 = (notes.wetdet_delin_number == wdID) & (notes.record_ID == r_id)
+                fields = notes.loc[sel1, 'field'].unique()
+                for field in fields:
+                    sel2 = sel1 & (notes.field==field)
+                    k = notes[sel2].shape[0]
+                    if k > 1:
+                        df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
+                        cor_types = notes.loc[sel2, 'cor_type'].values
+                        for cor_type in cor_types:
+                            sel3 = sel2 & (notes.cor_type==cor_type)
+                            ind = trsqq_cor_dict[cor_type]
+                            df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x,
+                                                                                                index=ind,
+                                                                                                replacement=notes.loc[sel3, 'to'].values[0]))
+                    else:
+                        to = notes.loc[sel2, 'to'].values[0]
+                        if to.isdigit():
+                            to = to.zfill(2)
+                        df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
+                                                                                    to))
+        else:    
+            sel = df.wetdet_delin_number == wdID
+            fields = notes.loc[notes.wetdet_delin_number == wdID, 'field'].unique()
+            for field in fields:
+                sel2 = (notes.wetdet_delin_number==wdID) & (notes.field==field)
+                k = notes[sel2].shape[0]
+                if k > 1:
+                    df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
+                    cor_types = notes.loc[sel2, 'cor_type'].values
+                    for cor_type in cor_types:
+                        sel3 = (notes.wetdet_delin_number==wdID) & (notes.field==field) & (notes.cor_type==cor_type)
+                        ind = trsqq_cor_dict[cor_type]
+                        df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x,
+                                                                                            index=ind,
+                                                                                            replacement=notes.loc[sel3, 'to'].values[0]))
+                else:
+                    to = notes.loc[sel2, 'to'].values[0]
+                    if to.isdigit():
+                        to = to.zfill(2)
+                    df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
+                                                                                to))
     if export:
         df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{s}_{ml}_1.csv'), index=False)
     return df
@@ -431,7 +513,8 @@ def update_unmatched_df_r2(df, setID, ml, export=True):
     rev_df = rev_df.copy()[~rev_df.wetdet_delin_number.isin(nt_df.wetdet_delin_number.unique())]
     rev_df = rev_df[['wetdet_delin_number', 'cor_trsqq']]
     ndf = df.merge(rev_df, on='wetdet_delin_number')
-    ndf.loc[:, 'trsqq'] = ndf.loc[:, 'cor_trsqq'].apply(lambda x: x.rstrip('0'))
+    selectedID = ndf.cor_trsqq.astype(str) != 'nan'
+    ndf.loc[selectedID, 'trsqq'] = ndf.loc[selectedID, 'cor_trsqq'].apply(lambda x: x.rstrip('0'))
     ndf.drop(columns='cor_trsqq', inplace=True)
     rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_1.csv'))
     rdf = ndf.append(rev_df, ignore_index = True)
@@ -490,6 +573,7 @@ def unique(list1):
 # function to get all the lot numbers
 # x is parcel_id
 def get_lot_numbers(x):
+    #print(x)
     if x is None:
         res = None
     elif type(x) is int:
@@ -605,12 +689,15 @@ def convert_trsqq(x):
 # return reindexed data
 def reindex_data(wd_dt):
     # get a list of lot numbers in each parcel id record
-    wd_dt.loc[:, 'lots'] = wd_dt.parcel_id.apply(lambda x: get_lot_numbers(x))
+    # will need to review the records without any parcel ids
+    selectedID = wd_dt.parcel_id.astype(str) != 'nan'
+    wd_dt = wd_dt.copy()[selectedID]
+    wd_dt.loc[:, 'lots'] = wd_dt['parcel_id'].apply(lambda x: get_lot_numbers(x))
     # repeat the rows based on the number of lot numbers
     ndf = wd_dt.reindex(wd_dt.index.repeat(wd_dt.lots.str.len()))
     # add the column to list the lot for all
     ndf.loc[:, 'lot'] = list(chain.from_iterable(wd_dt.lots.values.tolist()))
-    ndf['lots'] = ndf['lots'].apply(lambda x: ', '.join(dict.fromkeys(x).keys()))
+    ndf.loc[:, 'lots'] = ndf['lots'].apply(lambda x: ', '.join(dict.fromkeys(x).keys()))
     # get county code
     ndf.loc[:, 'cnt_code'] = ndf.county.map(cnt_dict)
     # get OR taxlot IDs for wd data
@@ -638,10 +725,10 @@ def clean_wd_table(setID, file):
     wd_dt = read_wd_table(setID, file)
     # this will help identify problematic records with numbers
     selectedID = wd_dt.parcel_id.astype(str) != 'nan'
-    wd_dt.loc[selectedID, 'notes'] = wd_dt[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
+    wd_dt.loc[selectedID, 'notes'] = wd_dt.copy()[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
     ndf = reindex_data(wd_dt)
     # get year from the receive date
-    ndf.loc[:, 'recyear'] = ndf.received_date.apply(lambda x: x.year)
+    ndf.loc[:, 'recyear'] = ndf.copy().received_date.apply(lambda x: x.year)
     # get year from the wd ID 
     ndf.loc[:, 'IDyear'] = ndf.wetdet_delin_number.apply(lambda x: x[2:6])
     ndf.loc[selectedID, 'missinglot'] = ndf.loc[selectedID, 'parcel_id'].apply(lambda x: without_lots(x))
@@ -680,7 +767,7 @@ def combine_wd_tables(setID, nm_to_add):
     wd_df = pd.concat(frames, ignore_index=True)
     # this creates unique IDs for all the records in the same set
     wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1) 
-    wd_df.loc[:, 'record_ID'] = wd_df.loc[:, 'record_ID'] + nm_to_add
+    wd_df.loc[:, 'record_ID'] = wd_df.copy().loc[:, 'record_ID'] + nm_to_add
     selectedID = wd_df.parcel_id.astype(str) != 'nan'
     wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
     # get year from the receive date
@@ -721,12 +808,12 @@ def get_record_dict(setID, wd_df):
         count = len(wd_df[wd_df.county == cnty])
         count_records.append(count)
     record_df = pd.DataFrame({'county': counties, 'rcount':count_records})
-    record_df['cum_count'] = record_df[['rcount']].cumsum(axis = 0, skipna = True).rcount.values
+    record_df['cum_count'] = record_df.copy()[['rcount']].cumsum(axis = 0, skipna = True).rcount.values
     record_dict = dict(zip(record_df.county[1:len(counties)], record_df.cum_count[0:(len(counties)-1)]))
     return counties, record_dict
 
 # combine taxlots from all years
-def combine_taxlot(exportID=False):
+def combine_taxlot(exportID=True):
     frames = []
     for year in range(yearstart, yearend):
         tx_dt = read_taxlot(year)
@@ -746,6 +833,7 @@ def update_recordID(df, wd_df, setID, nm_to_add):
     counties = get_record_dict(setID, wd_df)[0]
     selected_cnty = df.county.isin(counties[1:])
     record_dict = get_record_dict(setID, wd_df)[1]
+    df = df.copy()
     df.loc[selected_cnty, 'record_ID'] = df.loc[selected_cnty, 'recordID'] + df[selected_cnty].county.map(record_dict) + nm_to_add
     df.loc[df.county == counties[0], 'record_ID'] = df.loc[df.county == counties[0], 'recordID'] + nm_to_add
     df.loc[:, 'record_ID'] = df.record_ID.astype('int64', copy=False)
@@ -779,7 +867,7 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
         tocheck_df = df[df.ORTaxlot.isin(found)]
         taxlot_tocheck = all_taxlot[all_taxlot.ORTaxlot.isin(found)]
         taxlot_tocheck = taxlot_tocheck.merge(tocheck_df, on='ORTaxlot', how='left')
-        taxlot_tocheck.loc[:, 'ydiff'] = taxlot_tocheck[['year', 'IDyear']].apply(lambda row: abs(int(row.year) - int(row.IDyear)), axis=1)
+        taxlot_tocheck.loc[:, 'ydiff'] = taxlot_tocheck.copy()[['year', 'IDyear']].apply(lambda row: abs(int(row.year) - int(row.IDyear)), axis=1)
         tdf = taxlot_tocheck.sort_values(by=['ORTaxlot', 'ydiff'])
         # keep the taxlot from the closest year
         tdf = tdf.drop_duplicates(subset='ORTaxlot', keep="first")
@@ -1051,9 +1139,11 @@ def read_trsqq():
     df = pd.read_csv(os.path.join(inpath, "trsqq_df.csv"))
     return trsqq, trsqq_dict, df
 
-# get the maybe taxlot
-# this is a test function
 def get_maybe_taxlot(trsqq_to_check):
+    """
+    get the maybe taxlot from the trsqq_to_check
+    this is a test function
+    """    
     trsqq, trsqq_dict, df = read_trsqq()
     closematch = difflib.get_close_matches(trsqq_to_check, trsqq)
     trsqq_matched = unique(closematch)
@@ -1066,12 +1156,14 @@ def get_maybe_taxlot(trsqq_to_check):
         values = search_res
     return values
 
-# reorganize the tocheck data
-# tocheck_df is the last output of check_corrected_data: df_wlots_to_check
-# trsqq_n: new trsqq
-# n_trsqq: number of possibly corrected trsqq values from the search
-# this is a test function
 def reorganize_tocheck(tocheck_df):
+    """ 
+    reorganize the unmatched wd records to search for a potential match
+    input is the output of check_corrected_data: df_wlots_to_check
+    trsqq_n: new trsqq
+    n_trsqq: number of possibly corrected trsqq values from the search
+    this is a test function
+    """
     tocheck_df.loc[:, 'trsqq_n'] = tocheck_df.loc[:, 'trsqq'].apply(lambda x: get_maybe_taxlot(x))
     tocheck_df.loc[:, 'n_trsqq'] = tocheck_df.loc[:, 'trsqq_n'].apply(lambda x: len(x))
     torematch_df = tocheck_df[tocheck_df.n_trsqq == 1]
