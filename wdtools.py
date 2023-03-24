@@ -971,7 +971,7 @@ def records_with_lots(gdf, setID, nm_to_add, c='Y'):
 # review the unmatched records with taxlot IDs to rematch with corrected data info
 # df is reindexed from combined_reindexed_data
 def review_with_lots(df, setID, all_taxlot, nm_to_add):
-    n_gdf = match_wd_data_with_taxlot(df, setID, all_taxlot, nm_to_add)
+    n_gdf = match_wd_data_with_taxlot(df, setID, all_taxlot)
     wd_df = combine_wd_tables(setID, nm_to_add)
     df_wo_lots = records_with_lots(n_gdf, setID, nm_to_add, c='Y')
     wo_lots_ID = df_wo_lots.record_ID.unique()
@@ -1039,7 +1039,7 @@ def check_corrected_data(df, setID, all_taxlot, nm_to_add, export=False):
     df_wlots_to_check = df_wlots[df_wlots.wetdet_delin_number.isin(wdID_to_check+comIDs)]
     cor_df.loc[:, 'county'] = cor_df.county.apply(lambda x: string.capwords(x))
     cor_df = reindex_data(cor_df)
-    cor_df_re = match_wd_data_with_taxlot(df=cor_df, setID=setID, all_taxlot=all_taxlot, nm_to_add=nm_to_add)
+    cor_df_re = match_wd_data_with_taxlot(df=cor_df, setID=setID, all_taxlot=all_taxlot)
     collist = list(gdf.columns)
     collist.remove('recordID')
     ndf = gdf.append(cor_df_re[collist])
