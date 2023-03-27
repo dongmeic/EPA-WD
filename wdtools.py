@@ -33,6 +33,7 @@ outfolder = 'output\\matched'
 cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
 # create a dictionary to look up county code
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
+trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 
 def read_trsqq():
     """
@@ -285,8 +286,6 @@ def join_list_elements(my_list):
     res = delimiter1.join(my_list[:position1]) + delimiter1 + delimiter1.join(my_list[position1:position2]) + delimiter2 + my_list[position2]
     return res
 
-trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
-
 def report_trsqq_correction(trsqq_to_check, trsqq_to_compare, to_correct=False):
     diff_idx, correct_trsqq_elements, errors = compare_trsqq(trsqq_to_check, trsqq_to_compare)
     if len(diff_idx) == 1:
@@ -411,8 +410,14 @@ def split_unmatched_df(df, ml, setID, export=True):
         r2_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_{ml}.csv'), index=False)
     return r1_df, r2_df
 
-# df is the second output from split_unmatched_df
 def generate_taxlot_output(df, taxlot, setID, ml, export=False):
+    """
+    generate the taxlot output for the unmatched records
+    df: the second output from split_unmatched_df
+    taxlot: the taxlot shapefile
+    setID: the setID of the unmatched records
+    ml (missing lot): whether the unmatched records are missing parcel id in digit
+    """
     df['pairs'] = list(zip(df['IDyear'].astype(str), df['ORTaxlot']))
     taxlots_to_review = taxlot[taxlot[['year', 'ORTaxlot']].apply(tuple, axis=1).isin(df.pairs.values)]
     taxlots_to_review_2 = taxlots_to_review.merge(df, on='ORTaxlot')
@@ -422,16 +427,27 @@ def generate_taxlot_output(df, taxlot, setID, ml, export=False):
     return taxlots_to_review_2
 
 def taxlot_from_coord(x):
+    """
+    get trsqq and txid from the correction notes
+    """
     txid = x.split('the matched taxlot is ')[1].split(' for ')[0]
     trsqq = x.split(' for ')[1]
     return trsqq, txid
 
 def trsqq_from_nearby_taxlot(x):
+    """
+    get trsqq and txid from the correction notes
+    """
     txid = x.split(', about')[0].replace('coordinate might be incorrect, nearby taxlot is ', '')
     return trsqq_dict[txid], txid
 
-# df is the second output from split_unmatched_df
 def review_unmatched_df_r2(df, taxlot, setID, ml, export=True):
+    """
+    df: the second output from split_unmatched_df
+    taxlot: the taxlot shapefile
+    setID: the ID of the set
+    ml (missing lot): whether the unmatched records are missing parcel id in digit
+    """
     outdf = df.copy()[['wetdet_delin_number', 'trsqq', 'parcel_id', 'county', 'latitude', 'longitude', 'DecisionLink', 'record_ID', 'IDyear']]
     outdf.loc[:,'correct_type'], outdf.loc[:,'correction'] = zip(*outdf.apply(lambda row: review_wd_record_w_coord(wd_id = row.wetdet_delin_number, 
                                                                         county_to_check = row.county, 
@@ -467,13 +483,41 @@ trsqq_cor_dict = {'township number': 0,
                   'QQ':8}
 
 def replace_str_index(text,index=0,replacement=''):
+    """
+    replace a character in a string at a given index
+    """
     return text[:index] + replacement + text[index+len(replacement):]
 
-# df is the output from split_unmatched_df
+def adjust_cor(x):
+    """
+    adjust the correction from single digit to double digit
+    """
+    if x.isdigit():
+        return str(x).zfill(2)
+    else:
+        return x
+
+def adjust_cor_from_to(df):
+    """
+    adjust the correction data frame where the from and to columns are single digit to double digit
+    df: reindexed df from reindex_data; df from correct_unmatched or update_unmatched_df_r2 or combine_corrected_unmatched function
+    """
+    df.loc[:, 'from'] = df['from'].apply(lambda x: adjust_cor(x))
+    df.loc[:, 'to'] = df['to'].apply(lambda x: adjust_cor(x))
+    return df
+
 # need to run review_unmatched_df_r2 and do some manual review work first to get the notes
 # the document to review is review_unmatched_Set00?_r2_N_0.csv
 def correct_unmatched(df, setID, s, ml, export=True):
+    """
+    df: the output from split_unmatched_df
+    setID: the set ID
+    s: the split number - r1 or r2, r for review
+    ml (missing lot): whether the unmatched records are missing parcel id in digit
+    export: whether to export the corrected unmatched records
+    """
     notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_{s}_{ml}_notes.csv'))
+    notes = adjust_cor_from_to(notes)
     rID = 'record_ID' in notes.columns
     df = df.copy()[df.wetdet_delin_number.isin(notes.wetdet_delin_number.unique())]
     for wdID in df.wetdet_delin_number.unique():
@@ -485,8 +529,7 @@ def correct_unmatched(df, setID, s, ml, export=True):
                 fields = notes.loc[sel1, 'field'].unique()
                 for field in fields:
                     sel2 = sel1 & (notes.field==field)
-                    k = notes[sel2].shape[0]
-                    if k > 1:
+                    if field == 'trsqq':
                         df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
                         cor_types = notes.loc[sel2, 'cor_type'].values
                         for cor_type in cor_types:
@@ -496,18 +539,13 @@ def correct_unmatched(df, setID, s, ml, export=True):
                                                                                                 index=ind,
                                                                                                 replacement=notes.loc[sel3, 'to'].values[0]))
                     else:
-                        to = notes.loc[sel2, 'to'].values[0]
-                        if to.isdigit():
-                            to = to.zfill(2)
-                        df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
-                                                                                    to))
+                        df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0], notes.loc[sel2, 'to'].values[0]))
         else:    
             sel = df.wetdet_delin_number == wdID
             fields = notes.loc[notes.wetdet_delin_number == wdID, 'field'].unique()
             for field in fields:
                 sel2 = (notes.wetdet_delin_number==wdID) & (notes.field==field)
-                k = notes[sel2].shape[0]
-                if k > 1:
+                if field == 'trsqq':
                     df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
                     cor_types = notes.loc[sel2, 'cor_type'].values
                     for cor_type in cor_types:
@@ -518,19 +556,22 @@ def correct_unmatched(df, setID, s, ml, export=True):
                                                                                             replacement=notes.loc[sel3, 'to'].values[0]))
                 else:
                     to = notes.loc[sel2, 'to'].values[0]
-                    if to.isdigit():
-                        to = to.zfill(2)
-                    df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0],
-                                                                                to))
+                    # if to.isdigit():
+                    #     to = to.zfill(2)
+                    df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0], to))
     if export:
         df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{s}_{ml}_1.csv'), index=False)
     return df
 
-# need to run review_unmatched_df_r2 and do some manual work frist
-# rev_df is the output from review_unmatched_df_r2, nt_df is from manual input
-# df is the second output from split_unmatched_df
-# this is a parallel run with correct_unmatched for r2_df
+# need to run review_unmatched_df_r2 and do some manual work frist to get the notes
 def update_unmatched_df_r2(df, setID, ml, export=True):
+    """
+    df: the second output from split_unmatched_df
+    setID: the setID
+    ml (missing lot): whether the unmatched records are missing parcel id in digit
+    export: whether to export the updated unmatched df
+    """
+    # rev_df is the output from review_unmatched_df_r2, nt_df is from manual input
     rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_0.csv'))
     nt_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_{ml}_notes.csv'))
     df = df.copy()[~df.wetdet_delin_number.isin(nt_df.wetdet_delin_number.unique())]
@@ -547,6 +588,11 @@ def update_unmatched_df_r2(df, setID, ml, export=True):
     return rdf
 
 def combine_corrected_unmatched(setID,ml,export=True):
+    """
+    combine the output from correct_unmatched and update_unmatched_df_r2
+    setID: the setID of the unmatched records
+    ml (missing lot): whether the unmatched records are missing parcel id in digit
+    """
     rev_df1 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r1_{ml}_1.csv'))
     rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'))
     df = rev_df1.append(rev_df2, ignore_index = True)
@@ -555,13 +601,24 @@ def combine_corrected_unmatched(setID,ml,export=True):
     return df
 
 def review_WD_record_via_Pro(gdf, wdID):
+    """
+    review the unmatched records via Pro
+    gdf: the output from split_unmatched_df
+    wdID: the wetdet_delin_number of the unmatched records
+    return the gdf of the unmatched records
+    """
     gdf = gdf[gdf.wdID == wdID]
     gdf.to_file(os.path.join(inpath, 'output', 'wd_shp', wdID + '.shp'))
     return gdf
 
-# df is the output from review_unmatched_df_r2
 # make sure ORTaxlot is in the right format from df
 def get_taxlot_to_check_r2(revdf, taxlot, setID, ml):
+    """
+    revdf: the output from review_unmatched_df_r2
+    taxlot: the taxlot shapefile
+    setID: the setID of the unmatched records
+    ml (missing lot): whether the unmatched records are missing parcel id in digit
+    """
     df = revdf.copy()
     df['pairs'] = list(zip(df['IDyear'].astype(str), df['ORTaxlot']))
     taxlots_to_review = taxlot[taxlot[['year', 'ORTaxlot']].apply(tuple, axis=1).isin(df.pairs.values)]
@@ -590,9 +647,10 @@ def adjust_taxlot_df(df):
 
 ################################################ Tier 1 #####################################################
 # gdf below generally refers to the matched records
-
-# function to list files or folders
 def list_files(path, folder=False):
+    """
+    This function takes a path and returns a list of files in the path
+    """
     f = []
     for (dirpath, dirnames, filenames) in walk(path):
         f.extend(filenames)
@@ -601,14 +659,19 @@ def list_files(path, folder=False):
         f = [x[0] for x in os.walk(path)]
     return f
 
-# function to remove duplicates in the parcel ids
 def unique(list1):
+    """
+    This function takes a list and returns a list of unique values
+    """
     x = np.array(list1)
     return list(np.unique(x))
 
-# function to get all the lot numbers
-# x is parcel_id
 def get_lot_numbers(x):
+    """
+    This function takes a string or integer and returns a list of lot numbers
+    function to get all the lot numbers
+    x is parcel_id
+    """
     #print(x)
     if x is None:
         res = None
@@ -654,14 +717,17 @@ def get_lot_numbers(x):
                 res.append(msg)
     return res
 
-# function to review duplicated records
-# return the list and the list length
 def check_duplicates(v):
+    """
+    check duplicates in a list
+    """
     itemlist = [item for item, count in collections.Counter(v).items() if count > 1]
     return itemlist, len(itemlist)
 
-# read wd tables, recordID is used for single tables
 def read_wd_table(setID, file):
+    """
+    read wd tables, recordID is used for single tables
+    """
     datafile = os.path.join(wdpath, setID, file)
     xl = pd.ExcelFile(datafile)
     wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
@@ -670,8 +736,10 @@ def read_wd_table(setID, file):
     wd_dt.loc[:, 'recordID'] = range(1, wd_dt.shape[0] + 1)
     return wd_dt
 
-# get township or range code
 def get_tr_code(x, code='t'):
+    """
+    get township or range code from the taxlot
+    """
     nms = re.findall('\d+', x)
     if code=='t':
         nm1 = nms[0]
@@ -703,8 +771,10 @@ def get_tr_code(x, code='t'):
     res = tr1 + tr2 + tr3
     return res
    
-# get section code
 def get_s_code(x):
+    """
+    get section code from trsqq code
+    """
     if len(x) <= 7:
         s = '00'
     else:
@@ -717,17 +787,26 @@ def get_s_code(x):
     return s       
 
 def convert_trsqq(x):
+    """
+    convert township, range, section, and quarter-quarter to the taxlot id format
+    """
     s = re.sub("V|X|Y|Z", "", x)
     xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + '{:0<10}'.format(s)[8] + '{:0<10}'.format(s)[9]
     return xt[:16]
 
 def create_ORTaxlot(cnt_code, trsqq, lot):
+    """
+    create the taxlot id based on the county code, township, range, section, and lot number
+    """
     taxlotID = str(cnt_code).zfill(2) + convert_trsqq(trsqq) + '--' + ('000000000' + lot)[-9:]
     return taxlotID
 
-# wd_dt is from read_wd_table or reorganize_tocheck
-# return reindexed data
 def reindex_data(wd_dt):
+    """
+    reindex the data based on the number of lots in each parcel id
+    wd_dt is from read_wd_table or reorganize_tocheck
+    return reindexed data
+    """
     # get a list of lot numbers in each parcel id record
     # will need to review the records without any parcel ids
     selectedID = wd_dt.parcel_id.astype(str) != 'nan'
@@ -744,8 +823,10 @@ def reindex_data(wd_dt):
     ndf.loc[:, 'ORTaxlot'] = ndf[['cnt_code', 'trsqq', 'lot']].apply(lambda row: create_ORTaxlot(cnt_code=row.cnt_code, trsqq=row.trsqq, lot=row.lot), axis = 1)
     return ndf
 
-# add notes to the wd records
 def make_notes(text):
+    """
+    add notes to the wd records
+    """
     r = re.search('ROW|RR', text, re.IGNORECASE)
     p = re.search('partial|part|p|portion', text, re.IGNORECASE)
     m = re.search('Many|multiple|SEVERAL|various', text, re.IGNORECASE)
@@ -759,8 +840,11 @@ def make_notes(text):
     res = ', '.join(res)
     return res
 
-# function to clean up wd data by single file
+
 def clean_wd_table(setID, file):
+    """
+    function to clean up wd data by single file
+    """
     start = time.time()
     wd_dt = read_wd_table(setID, file)
     # this will help identify problematic records with numbers
@@ -778,8 +862,10 @@ def clean_wd_table(setID, file):
     #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return ndf
 
-# check whether the parcel ID is without lots
 def without_lots(text):
+    """
+    check whether the parcel ID is without lots
+    """
     if any(c.isdigit() for c in text):
         nms = re.findall(r'\d+', text)
         if all([any([x in text for x in [nm+'st', nm+'nd', nm+'rd', nm+'th',
@@ -791,10 +877,12 @@ def without_lots(text):
         res = 'Y'
     return res
 
-# combine all the wd tables in the set to review unique records, record_ID is used for combined tables
-# use this function when reindex is not neccessary
-# nm_to_add is the number of previous records (records from the previous sets; same to all functions with this variable)
 def combine_wd_tables(setID, nm_to_add):
+    """
+    Combine all the wd tables in the set to review unique records, record_ID is used for combined tables
+    use this function when reindex is not neccessary
+    nm_to_add is the number of previous records (records from the previous sets; same to all functions with this variable)
+    """
     files = list_files(os.path.join(wdpath, setID))
     # in case there are unidentified files
     files = [file for file in files if '~$' not in file]
@@ -946,14 +1034,17 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
                       }, inplace=True)
         ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
-    if update:
-        matched = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'))
-        ngdf = matched.append(ngdf[selcols], ignore_index = True)
-    if export: 
-        # the update will overwrite the first output
-        ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
-                                                  driver='ESRI Shapefile')  
-    return ngdf
+        if update:
+            matched = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'))
+            ngdf = matched.append(ngdf[selcols], ignore_index = True)
+        if export: 
+            # the update will overwrite the first output
+            ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
+                                                    driver='ESRI Shapefile')  
+        return ngdf
+    else:
+        print('no matched records found')
+        return None
 
 def report_unmatched(gdf, setID, nm_to_add, mute = False):
     """
