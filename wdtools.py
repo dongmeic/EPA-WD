@@ -58,7 +58,11 @@ with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
 pd.options.mode.chained_assignment = None
 
 ################################################ Tier 3 & 4 #####################################################
+
 def review_loop_r1(df):
+    """
+    loop through the unmatched records and check the original records
+    """
     for wdID in df.wetdet_delin_number.unique():
         print(wdID)
         print(check_unmatched_r1(wdID = wdID, df = df))
@@ -68,9 +72,12 @@ def review_loop_r1(df):
                 user_input = input("Press 'c' to continue...")
                 if user_input == 'c':
                     break
-        time.sleep(1) # wait for 1 second between iterations
+        time.sleep(1)
 
 def check_unmatched_r1(wdID, df):
+    """
+    check unmatched records for a given WDID
+    """
     url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
     selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes']
     if str(url) == 'nan':
@@ -80,6 +87,9 @@ def check_unmatched_r1(wdID, df):
     return df.loc[df.wetdet_delin_number == wdID, selcols]
 
 def review_loop(df):
+    """
+    loop through the unmatched records and check the review notes
+    """
     df = df.reset_index()
     for i in range(df.shape[0]):
         wdID = df.loc[i, 'wetdet_delin_number']
@@ -91,9 +101,12 @@ def review_loop(df):
                 user_input = input("Press 'c' to continue...")
                 if user_input == 'c':
                     break
-        time.sleep(1) # wait for 1 second between iterations
+        time.sleep(1)
 
 def check_review_notes_r2n(wdID, df):
+    """
+    check review notes for a given WDID
+    """
     url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
     if str(url) == 'nan':
         print('Decision link is not available')
@@ -102,6 +115,9 @@ def check_review_notes_r2n(wdID, df):
     return df.loc[df.wetdet_delin_number == wdID, ['correct_type', 'correction', 'cor_trsqq']]
 
 def check_completeness(setID='003', a=3):
+    """
+    check completeness of the mapping
+    """
     partial = gpd.read_file(revpath, layer=f'Set{setID}_partial')
     mapped1 = list(partial.wdID.unique())
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'Set{setID}_wo_lot', f'Set{setID}_partial']) and ('L' not in lyr)]
@@ -113,6 +129,9 @@ def check_completeness(setID='003', a=3):
     return sorted(mapped), len(mapped)
 
 def extract_page_from_locPath(filePath, pageNm, wdID):
+    """
+    Extract a page from a pdf file from a local path
+    """
     pdf_file = PdfFileReader(filePath)
     pageObj = pdf_file.getPage(pageNm)
     pdf_writer = PdfFileWriter()
@@ -122,6 +141,9 @@ def extract_page_from_locPath(filePath, pageNm, wdID):
         pdf_writer.write(output_pdf) 
 
 def extract_page_from_docLink(url, pageNm, wdID):
+    """
+    Extract a page from a pdf file from a url
+    """
     response = requests.get(url=url, timeout=120)
     on_fly_mem_obj = io.BytesIO(response.content)
     pdf_file = PdfFileReader(on_fly_mem_obj)
@@ -133,6 +155,9 @@ def extract_page_from_docLink(url, pageNm, wdID):
         pdf_writer.write(output_pdf) 
 
 def review_mapped(setID):
+    """
+    Review the mapped taxlots
+    """
     revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     for wID in mapped0:
@@ -142,6 +167,9 @@ def review_mapped(setID):
                 print(wID)
 
 def revise_single_partial_file(wID):
+    """
+    Revise the geometry of a single partial taxlot
+    """
     gdf = gpd.read_file(revpath, layer=wID)
     gdf = gdf.to_crs(epsg=2992)
     selcols = ['Shape_Length', 'Shape_Area']
@@ -154,14 +182,19 @@ def revise_single_partial_file(wID):
     return df
 
 def merge_single_partial_file(wIDlist):
+    """
+    Merge the revised partial taxlots into a single GeoDataFrame
+    """
     df = pd.DataFrame()
     for wID in wIDlist:
         df=pd.concat([df, revise_single_partial_file(wID)], ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
 
-# require the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
 def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
+    """
+    Combine the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
+    """
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
@@ -192,6 +225,9 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
 
 ################################################ Tier 2 #####################################################
 def get_point_from_lonlat(lon, lat, export=True):
+    """
+    Get a point from a lon/lat pair
+    """
     df = pd.DataFrame([[lon, lat]], columns=['Longitude', 'Latitude'])
     gdf = gpd.GeoDataFrame(df, crs="EPSG:4326", geometry=gpd.points_from_xy(df.Longitude, df.Latitude))
     gdf = gdf.to_crs(epsg=2992)
@@ -202,6 +238,9 @@ def get_point_from_lonlat(lon, lat, export=True):
 # point in polygon - WD point in taxtlot
 # require taxtlot
 def extract_taxlot_info(wd_pt, taxlot, year):
+    """
+    Extract taxlot information from a point in polygon analysis
+    """
     pip_mask = taxlot.contains(wd_pt.loc[0, 'geometry'])
     if any(pip_mask):
         pip_data = taxlot.loc[pip_mask].copy()
@@ -215,6 +254,9 @@ def extract_taxlot_info(wd_pt, taxlot, year):
     return ID
 
 def get_county_code_from_lonlat(lon, lat):
+    """
+    Get county code from longitude and latitude.
+    """
     geolocator = Nominatim(user_agent="geoapiExercises")
     location = geolocator.reverse(str(lat)+","+str(lon))
     address = location.raw['address']
@@ -224,11 +266,17 @@ def get_county_code_from_lonlat(lon, lat):
     return res
 
 def separate_numbers_letters(x):
+    """
+    Separate numbers and letters in a string.
+    """
     numbers = re.findall('\d+', x)
     letters = re.findall("[a-zA-Z]+", x)
     return numbers, letters
 
 def find_different_indices(list1, list2):
+    """
+    Find the indices of different items in two lists.
+    """
     different_indices = []
     for i, (a, b) in enumerate(zip(list1, list2)):
         if a != b:
@@ -236,6 +284,9 @@ def find_different_indices(list1, list2):
     return different_indices
 
 def pad_string(string, length=10):
+    """
+    Pad a string with 0s to a specified length.
+    """
     if len(string) < length:
         padded_string = string.ljust(length, '0')
     else:
@@ -247,6 +298,9 @@ def combine_lists(list1, list2):
     return combined_list
 
 def remove_tuple_format(input_list):
+    """
+    Remove tuple format from a list.
+    """
     output_list = []
     for item in input_list:
         if isinstance(item, tuple):
@@ -256,16 +310,25 @@ def remove_tuple_format(input_list):
     return output_list
 
 def get_list_elements_by_index(input_list, index_list):
+    """
+    Get elements from a list by index.
+    """
     output_list = [input_list[i] for i in index_list]
     return output_list
 
 def split_trsqq(trsqq_to_check):
+    """
+    Split a TRSQQ into a list of numbers and letters.
+    """
     numbers1, letters1 = separate_numbers_letters(trsqq_to_check[:-2])
     letters1.append(trsqq_to_check[-2:])
     trsqq_to_check_lst = remove_tuple_format(combine_lists(numbers1, letters1))
     return trsqq_to_check_lst
 
 def compare_trsqq(trsqq_to_check, trsqq_to_compare):
+    """
+    Compare two TRSQQs and return the indices of the different elements, the correct elements, and the errors.
+    """
     trsqq_to_check_lst = split_trsqq(trsqq_to_check)
     trsqq_to_compare_lst = split_trsqq(trsqq_to_compare)
     diff_idx = find_different_indices(trsqq_to_check_lst, trsqq_to_compare_lst)
@@ -279,6 +342,9 @@ def compare_trsqq(trsqq_to_check, trsqq_to_compare):
     return diff_idx, correct_trsqq_elements, errors
 
 def join_list_elements(my_list):
+    """
+    function to join list elements
+    """
     delimiter1 = ', '
     delimiter2 = ' and '
     position1 = 1
@@ -287,6 +353,9 @@ def join_list_elements(my_list):
     return res
 
 def report_trsqq_correction(trsqq_to_check, trsqq_to_compare, to_correct=False):
+    """
+    function to review and correct trsqq
+    """
     diff_idx, correct_trsqq_elements, errors = compare_trsqq(trsqq_to_check, trsqq_to_compare)
     if len(diff_idx) == 1:
         keylist = trsqq_correction_dict[diff_idx[0]]
@@ -333,6 +402,9 @@ def get_lot_number_from_taxlot(x):
     return res
 
 def correct_trsqq(trsqq_to_check, lon, lat, taxlot, year):
+    """
+    Corrects trsqq based on the taxlot information derived from the coordinate.
+    """
     #print(trsqq_to_check)
     wd_pt  = get_point_from_lonlat(lon = lon, lat = lat)
     tID = extract_taxlot_info(wd_pt = wd_pt, taxlot = taxlot, year = year)
@@ -345,60 +417,69 @@ def correct_trsqq(trsqq_to_check, lon, lat, taxlot, year):
 # this function only works when the coordinates are accurate and one-on-one match among WD ID, trsqq, parcel IDs, and coordinate
 # limitation - one WD record (possible with multiple records with different trasqq and parcel IDs) has only one coordindate
 def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_to_check, lon, lat, taxlot, year):
-        print(f'reviewing {wd_id}')
-        wd_pt  = get_point_from_lonlat(lon = lon, lat = lat)
-        tID = extract_taxlot_info(wd_pt = wd_pt, taxlot = taxlot, year = year)
-        if "away" not in tID:
-            trsqq_to_check_c = pad_string(trsqq_to_check)
-            lots_to_check = get_lot_numbers(parcel_IDs_to_check)
-            trsqq_to_compare = trsqq_dict[tID]
-            trsqq_to_compare_c = pad_string(trsqq_to_compare)
-            lots_to_compare = ttdf.loc[ttdf.trsqq==trsqq_to_compare, 'ORTaxlot'].values
-            lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))  
-            if trsqq_to_compare_c == trsqq_to_check_c:
-                print("trsqq matched, checking county code...")
-                cnty_code = int(get_county_code_from_lonlat(lon, lat))
-                county_to_compare = [key for key, value in cnt_dict.items() if value == cnty_code]
-                # need to check the typos in the county name first
-                if county_to_check == county_to_compare[0]:
-                    print("county code is corrected, need to check lot numbers...")
-                    if any([x not in lots_to_compare for x in lots_to_check]):
-                        lots_to_correct = [x for x in lots_to_check if x not in lots_to_compare]
-                        cor_type, cor_notes = "lot number", f'lot number {lots_to_correct} might be incorrect, the matched taxlot is {tID} for {trsqq_to_compare}'
-                        print("lot numbers might be wrong...")
-                    else:
-                        notes = 'lot numbers seem to be correct, need to review'
-                        print(notes)
-                        cor_type, cor_notes = None, notes
+    """
+    Reviews a WD record with coordinate information.
+    input includes all the key fields to be checked for taxlot information
+    """
+    print(f'reviewing {wd_id}')
+    wd_pt  = get_point_from_lonlat(lon = lon, lat = lat)
+    tID = extract_taxlot_info(wd_pt = wd_pt, taxlot = taxlot, year = year)
+    if "away" not in tID:
+        trsqq_to_check_c = pad_string(trsqq_to_check)
+        lots_to_check = get_lot_numbers(parcel_IDs_to_check)
+        trsqq_to_compare = trsqq_dict[tID]
+        trsqq_to_compare_c = pad_string(trsqq_to_compare)
+        lots_to_compare = ttdf.loc[ttdf.trsqq==trsqq_to_compare, 'ORTaxlot'].values
+        lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))  
+        if trsqq_to_compare_c == trsqq_to_check_c:
+            print("trsqq matched, checking county code...")
+            cnty_code = int(get_county_code_from_lonlat(lon, lat))
+            county_to_compare = [key for key, value in cnt_dict.items() if value == cnty_code]
+            # need to check the typos in the county name first
+            if county_to_check == county_to_compare[0]:
+                print("county code is corrected, need to check lot numbers...")
+                if any([x not in lots_to_compare for x in lots_to_check]):
+                    lots_to_correct = [x for x in lots_to_check if x not in lots_to_compare]
+                    cor_type, cor_notes = "lot number", f'lot number {lots_to_correct} might be incorrect, the matched taxlot is {tID} for {trsqq_to_compare}'
+                    print("lot numbers might be wrong...")
                 else:
-                    cor_type, cor_notes = "county", f'from {county_to_check} to {county_to_compare}'
-                    print("corrected county...")
+                    notes = 'lot numbers seem to be correct, need to review'
+                    print(notes)
+                    cor_type, cor_notes = None, notes
             else:
-                # check the lot numbers
-                lots_matched = [x for x in lots_to_check if x in lots_to_compare]
-                if len(lots_matched) > 0:
-                    if len(lots_matched) == len(lots_to_check):
-                        print("all lots are matched...")
-                        cor_type, cor_notes = report_trsqq_correction(trsqq_to_check_c, trsqq_to_compare_c)
-                        print("corrected trsqq...")
-                    else:
-                        notes = f"some lots are not matched, need to review trsqq, the close-match is {trsqq_to_compare}"
-                        print(notes)
-                        print(f"lots to check: {lots_to_check}, and lots to compare: {lots_to_compare}")
-                        cor_type, cor_notes = "to review", notes
+                cor_type, cor_notes = "county", f'from {county_to_check} to {county_to_compare}'
+                print("corrected county...")
+        else:
+            # check the lot numbers
+            lots_matched = [x for x in lots_to_check if x in lots_to_compare]
+            if len(lots_matched) > 0:
+                if len(lots_matched) == len(lots_to_check):
+                    print("all lots are matched...")
+                    cor_type, cor_notes = report_trsqq_correction(trsqq_to_check_c, trsqq_to_compare_c)
+                    print("corrected trsqq...")
                 else:
-                    notes = f"there is not any matched lot, need to review trsqq, the close-match is {trsqq_to_compare}"
+                    notes = f"some lots are not matched, need to review trsqq, the close-match is {trsqq_to_compare}"
                     print(notes)
                     print(f"lots to check: {lots_to_check}, and lots to compare: {lots_to_compare}")
                     cor_type, cor_notes = "to review", notes
-        else:
-            notes = f'coordinate might be incorrect, nearby taxlot is {tID}'
-            print(notes)
-            cor_type, cor_notes = "coordinate", notes
-        return cor_type, cor_notes
+            else:
+                notes = f"there is not any matched lot, need to review trsqq, the close-match is {trsqq_to_compare}"
+                print(notes)
+                print(f"lots to check: {lots_to_check}, and lots to compare: {lots_to_compare}")
+                cor_type, cor_notes = "to review", notes
+    else:
+        notes = f'coordinate might be incorrect, nearby taxlot is {tID}'
+        print(notes)
+        cor_type, cor_notes = "coordinate", notes
+    return cor_type, cor_notes
 
-# df is the output from report_unmatched
 def split_unmatched_df(df, ml, setID, export=True):
+    """
+    split unmatched df into two parts: one part is the records with multiple matches, the other part is the records with only one match
+    df: the output from report_unmatched
+    ml (missing lot): whether the unmatched records are missing parcel id in digit
+    setID: the set ID of the unmatched records
+    """
     df = df[df.missinglot == ml]
     IDcol = 'wetdet_delin_number'
     value_counts = df[IDcol].value_counts()
@@ -631,6 +712,9 @@ def get_taxlot_to_check_r2(revdf, taxlot, setID, ml):
     return taxlots_to_review_2
 
 def adjust_taxlot(tx, ty):
+    """
+    adjust the taxlot with correct trsqq and taxlot with sheet number
+    """
     res = ty
     if tx in tsq_dst:
         pattern = ty.split('--')[1][1:]
@@ -642,6 +726,9 @@ def adjust_taxlot(tx, ty):
     return res
 
 def adjust_taxlot_df(df):
+    """
+    adjust the taxlot with correct trsqq and taxlot with sheet number in dataframe
+    """
     df.loc[:, 'ORTaxlot'] = df.copy()[['trsqq', 'ORTaxlot']].apply(lambda row: adjust_taxlot(row.trsqq, row.ORTaxlot), axis=1)
     return df
 
