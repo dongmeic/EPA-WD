@@ -59,6 +59,13 @@ pd.options.mode.chained_assignment = None
 
 ################################################ Tier 3 & 4 #####################################################
 
+def writelist(lst, lstnm, setID):
+    """
+    write a list to a pickle file
+    """
+    with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
+            pickle.dump(lst, f)
+
 def review_loop_r1(df):
     """
     loop through the unmatched records and check the original records
