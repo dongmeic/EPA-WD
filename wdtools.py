@@ -50,7 +50,6 @@ trsqq, trsqq_dict, ttdf = read_trsqq()
 tid_dst = [tid for tid in ttdf.ORTaxlot.unique() if any(substring in tid for substring in ['--D', '--S', '--T'])]
 tsq_dst = ttdf[ttdf.ORTaxlot.isin(tid_dst)].trsqq.unique()
 
-revpath = inpath + '\GIS\ArcGIS Pro Project\DataReview\DataReview.gdb'
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
 with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
         all_txid = pickle.load(f)
@@ -125,7 +124,8 @@ def check_completeness(setID='003', a=3):
     """
     check completeness of the mapping
     """
-    partial = gpd.read_file(revpath, layer=f'Set{setID}_partial')
+    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\Set{setID}.gdb'
+    partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     mapped1 = list(partial.wdID.unique())
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'Set{setID}_wo_lot', f'Set{setID}_partial']) and ('L' not in lyr)]
     mapped2 = list(map(lambda x: x.replace('_', '-'), mapped0))
@@ -173,10 +173,11 @@ def review_mapped(setID):
             if len(gdf.wdID.unique()) > 1:
                 print(wID)
 
-def revise_single_partial_file(wID):
+def revise_single_partial_file(setID, wID):
     """
     Revise the geometry of a single partial taxlot
     """
+    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
     gdf = gpd.read_file(revpath, layer=wID)
     gdf = gdf.to_crs(epsg=2992)
     selcols = ['Shape_Length', 'Shape_Area']
@@ -188,13 +189,13 @@ def revise_single_partial_file(wID):
     df.loc[:,'geometry'] = gdf.loc[:,'geometry']
     return df
 
-def merge_single_partial_file(wIDlist):
+def merge_single_partial_file(setID, wIDlist):
     """
     Merge the revised partial taxlots into a single GeoDataFrame
     """
     df = pd.DataFrame()
     for wID in wIDlist:
-        df=pd.concat([df, revise_single_partial_file(wID)], ignore_index=True)
+        df=pd.concat([df, revise_single_partial_file(setID, wID)], ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
 
@@ -202,11 +203,12 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     """
     Combine the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
     """
+    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     partial = partial.to_crs(epsg=2992)
-    gdf = merge_single_partial_file(mapped0)
+    gdf = merge_single_partial_file(setID=setID, wIDlist=mapped0)
     dat = gdf.append(partial, ignore_index=True)
     edited_gdf = matched[matched.wdID.isin(editedIDs)]
     edited_gdf = edited_gdf[['wdID', 'geometry']].dissolve('wdID')
@@ -228,7 +230,7 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     digitized_nIDs = len(editedIDs) + len(dat.wdID.unique()) + len(wo_lot.wdID.unique())
     if export:
         data3.to_file(os.path.join(inpath, "output", "final", f"mapped_wd_{setID}.shp"))
-    return data3, toCheck, digitized_nIDs, issueIDs
+    return data3, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
 
 ################################################ Tier 2 #####################################################
 def get_point_from_lonlat(lon, lat, export=True):
