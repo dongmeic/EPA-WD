@@ -21,6 +21,7 @@ from PyPDF2 import PdfFileReader, PdfFileWriter
 import fiona
 import webbrowser
 import time
+import googlemaps
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 wdpath = inpath + '\\DSL data originals'
@@ -30,10 +31,11 @@ yearend = 2023
 #outfolder = 'test'
 outfolder = 'output\\matched'
 # create a spreadsheet to create a dictionary for the match between county name and code
-cnt_ID = pd.read_excel(r'T:\DCProjects\EPA-WD\CNT_Code.xlsx')
+cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
 # create a dictionary to look up county code
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
+OR_counties = list(cnt_dict.keys())
 
 def read_trsqq():
     """
@@ -262,14 +264,31 @@ def extract_taxlot_info(wd_pt, taxlot, year):
         ID = ID + f', about {int(dist+0.5)} ft away'
     return ID
 
-def get_county_code_from_lonlat(lon, lat):
+def search_for_county_name(reverse_geocode_result):
+    my_list = reverse_geocode_result[0]['address_components']
+    search_key = 'long_name'
+    search_value = 'County'
+    for my_dict in my_list:
+        if search_key in my_dict and search_value in my_dict[search_key]:
+            return=my_dict[search_key].split(' '+search_value)[0]
+            break
+    else:
+        return None
+        print('Not found')
+
+def get_county_code_from_lonlat(lon, lat, googlemaps=True):
     """
     Get county code from longitude and latitude.
     """
-    geolocator = Nominatim(user_agent="geoapiExercises")
-    location = geolocator.reverse(str(lat)+","+str(lon))
-    address = location.raw['address']
-    county = address.get('county', '')
+    if googlemaps:
+        gmaps = googlemaps.Client(key=google_key)
+        reverse_geocode_result = gmaps.reverse_geocode((lat, lon))
+        
+    else:   
+        geolocator = Nominatim(user_agent="geoapiExercises")
+        location = geolocator.reverse(str(lat)+","+str(lon))
+        address = location.raw['address']
+        county = address.get('county', '')
     cnty = county.split(' ')[0]
     res = str(cnt_dict[cnty]).zfill(2)
     return res
@@ -538,6 +557,8 @@ def review_unmatched_df_r2(df, taxlot, setID, ml, export=True):
     setID: the ID of the set
     ml (missing lot): whether the unmatched records are missing parcel id in digit
     """
+    # exclude the unusual county records, e.g., Yamhill and Washington
+    df = df[df.county.isin(OR_counties)]
     outdf = df.copy()[['wetdet_delin_number', 'trsqq', 'parcel_id', 'county', 'latitude', 'longitude', 'DecisionLink', 'record_ID', 'IDyear']]
     outdf.loc[:,'correct_type'], outdf.loc[:,'correction'] = zip(*outdf.apply(lambda row: review_wd_record_w_coord(wd_id = row.wetdet_delin_number, 
                                                                         county_to_check = row.county, 
@@ -793,8 +814,9 @@ def get_lot_numbers(x):
         for r in re.split(",|, | ", txt):
             if '-' in r:
                 start, end = r.split('-')
-                lot_list += list(range(int(start), int(end)+1))
-                lot_list = list(map(lambda x: str(x), lot_list))
+                if start.isdigit() and end.isdigit():
+                    lot_list += list(range(int(start), int(end)+1))
+                    lot_list = list(map(lambda x: str(x), lot_list))
             else:
                 lot_list.append(r)
         # remove text elements
@@ -954,6 +976,8 @@ def clean_wd_table(setID, file):
     ndf.loc[selectedID, 'missinglot'] = ndf.loc[selectedID, 'parcel_id'].apply(lambda x: without_lots(x))
     ndf['response_date'] = ndf['response_date'].dt.strftime("%Y-%m-%d")
     ndf['received_date'] = ndf['received_date'].dt.strftime("%Y-%m-%d")
+    ndf['county'] = ndf['county'].apply(lambda x: x.title())
+    ndf = ndf[ndf.county.isin(OR_counties)]
     end = time.time()
     #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return ndf
@@ -1030,7 +1054,7 @@ def merge_data_by_year(setID, file, year):
 def get_record_dict(setID, wd_df):
     """
     get a county and record in a dictionary to update recordID
-    input wd_df is the output from combine_wd_tables (read all set001 data without merging)
+    input wd_df is the output from combine_wd_tables (read all set data without merging)
     """
     counties = wd_df.county.unique()
     count_records = []
@@ -1142,7 +1166,7 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
         print('no matched records found')
         return None
 
-def report_unmatched(gdf, setID, nm_to_add, mute = False):
+def report_unmatched(gdf, setID, nm_to_add, mute = True, export=False):
     """
     input gdf from match_wd_data_with_taxlot
     return the unmatched data after matching the taxlot data
@@ -1162,6 +1186,8 @@ def report_unmatched(gdf, setID, nm_to_add, mute = False):
     if not mute:
         print(f'it is about {r}% of data in the original {wd_df.shape[0]} records unmatched')
         print(f'there are {nc} records ({nr}% of the original records) without parcel id')
+    if export:
+        sorted_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}.csv'), index=False)  
     return sorted_df
     
 def compare_data_report(gdf, setID, nm_to_add, export = False):
@@ -1172,7 +1198,7 @@ def compare_data_report(gdf, setID, nm_to_add, export = False):
            2) addedID, added_gdf: what is added in the existing matched data;
            3) missed_ID: unmatched IDs
     """
-    unmatched_wd_df = report_unmatched(gdf, setID, nm_to_add, mute = True)
+    unmatched_wd_df = report_unmatched(gdf, setID, nm_to_add)
     # unmatched IDs from the run
     missed_ID = unmatched_wd_df.record_ID.unique()
     setgdf = gpd.read_file(os.path.join(inpath, 'GIS', 'Join_Statewide.gdb'), layer=f'WD_{setID}_Combined')
@@ -1221,7 +1247,7 @@ def records_with_lots(gdf, setID, nm_to_add, c='Y'):
     input gdf from match_wd_data_with_taxlot
     return the unmatched records with/without taxlot IDs
     """
-    unmatched_wd_df = report_unmatched(gdf, setID, nm_to_add, mute = True)
+    unmatched_wd_df = report_unmatched(gdf, setID, nm_to_add)
     double_check = unmatched_wd_df[unmatched_wd_df.missinglot == c]
     return double_check
 
