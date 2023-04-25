@@ -22,10 +22,13 @@ import fiona
 import webbrowser
 import time
 import googlemaps
+import json
+
+google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 wdpath = inpath + '\\DSL data originals'
-txpath = inpath + '\\GIS\ORMAP_data\ORMAP_Taxlot_Years'
+txpath = inpath + '\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years'
 yearstart = 2016
 yearend = 2023
 #outfolder = 'test'
@@ -51,6 +54,8 @@ def read_trsqq():
 trsqq, trsqq_dict, ttdf = read_trsqq()
 tid_dst = [tid for tid in ttdf.ORTaxlot.unique() if any(substring in tid for substring in ['--D', '--S', '--T'])]
 tsq_dst = ttdf[ttdf.ORTaxlot.isin(tid_dst)].trsqq.unique()
+
+cnts = gpd.read_file(inpath + "\\GIS\\Oregon_Counties.shp")
 
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
 with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
@@ -114,6 +119,7 @@ def review_loop(df):
 def check_review_notes_r2n(wdID, df):
     """
     check review notes for a given WDID
+    df is from r2 notes
     """
     url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
     if str(url) == 'nan':
@@ -235,13 +241,14 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     return data3, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
 
 ################################################ Tier 2 #####################################################
-def get_point_from_lonlat(lon, lat, export=True):
+def get_point_from_lonlat(lon, lat, transprj=True, export=True):
     """
     Get a point from a lon/lat pair
     """
     df = pd.DataFrame([[lon, lat]], columns=['Longitude', 'Latitude'])
     gdf = gpd.GeoDataFrame(df, crs="EPSG:4326", geometry=gpd.points_from_xy(df.Longitude, df.Latitude))
-    gdf = gdf.to_crs(epsg=2992)
+    if transprj:
+        gdf = gdf.to_crs(epsg=2992)
     if export:
         gdf.to_file(inpath + '\\test\point.shp')
     return gdf
@@ -270,26 +277,45 @@ def search_for_county_name(reverse_geocode_result):
     search_value = 'County'
     for my_dict in my_list:
         if search_key in my_dict and search_value in my_dict[search_key]:
-            return=my_dict[search_key].split(' '+search_value)[0]
+            return my_dict[search_key].split(' '+search_value)[0]
             break
     else:
-        return None
-        print('Not found')
+        print('County was not found on Maps!')
+        return None 
 
-def get_county_code_from_lonlat(lon, lat, googlemaps=True):
+def extract_county_name(point, polygon):
+    """
+    Extract county name from a point in polygon analysis
+    """
+    pip_mask = polygon.contains(point.loc[0, 'geometry'])
+    if any(pip_mask):
+        pip_data = polygon.loc[pip_mask].copy()
+    else:
+        pip_data = gpd.sjoin_nearest(point, polygon, distance_col='dist')
+    cnty = pip_data.NAME.values[0]
+    if not any(pip_mask):
+        dist = pip_data.dist.values[0]
+        print(f'Found {cnty}, about {int(dist+0.5)} degree away')
+    return cnty    
+    
+def get_county_code_from_lonlat(lon, lat, search="OR"):
     """
     Get county code from longitude and latitude.
+    The search method includes "GM" (GoogleMaps), "OSM" (OpenStreetMaps), and "OR" (Shapefile for Counties in Oregon, default)
     """
-    if googlemaps:
+    if search == "GM":
         gmaps = googlemaps.Client(key=google_key)
         reverse_geocode_result = gmaps.reverse_geocode((lat, lon))
-        
-    else:   
+        cnty = search_for_county_name(reverse_geocode_result)
+    elif search == "OSM":   
         geolocator = Nominatim(user_agent="geoapiExercises")
         location = geolocator.reverse(str(lat)+","+str(lon))
         address = location.raw['address']
         county = address.get('county', '')
-    cnty = county.split(' ')[0]
+        cnty = county.split(' ')[0]
+    else:
+        pnt = get_point_from_lonlat(lon, lat, transprj=False, export=False)
+        cnty = extract_county_name(pnt, cnts)
     res = str(cnt_dict[cnty]).zfill(2)
     return res
 
@@ -437,13 +463,13 @@ def correct_trsqq(trsqq_to_check, lon, lat, taxlot, year):
     wd_pt  = get_point_from_lonlat(lon = lon, lat = lat)
     tID = extract_taxlot_info(wd_pt = wd_pt, taxlot = taxlot, year = year)
     trsqq_to_check_c = pad_string(trsqq_to_check)
-    trsqq_to_compare = trsqq_dict[tID]
+    trsqq_to_compare = taxlot2trsqq(tID)
     trsqq_to_compare_c = pad_string(trsqq_to_compare)
     res = report_trsqq_correction(trsqq_to_check_c, trsqq_to_compare_c, to_correct=True)    
     return res, tID
 
 # this function only works when the coordinates are accurate and one-on-one match among WD ID, trsqq, parcel IDs, and coordinate
-# limitation - one WD record (possible with multiple records with different trasqq and parcel IDs) has only one coordindate
+# limitation - one WD record (possibly with multiple records with different trasqq and parcel IDs) has only one coordindate
 def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_to_check, lon, lat, taxlot, year):
     """
     Reviews a WD record with coordinate information.
@@ -455,10 +481,10 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
     if "away" not in tID:
         trsqq_to_check_c = pad_string(trsqq_to_check)
         lots_to_check = get_lot_numbers(parcel_IDs_to_check)
-        trsqq_to_compare = trsqq_dict[tID]
+        trsqq_to_compare = taxlot2trsqq(tID)
         trsqq_to_compare_c = pad_string(trsqq_to_compare)
         lots_to_compare = ttdf.loc[ttdf.trsqq==trsqq_to_compare, 'ORTaxlot'].values
-        lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))  
+        lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))
         if trsqq_to_compare_c == trsqq_to_check_c:
             print("trsqq matched, checking county code...")
             cnty_code = int(get_county_code_from_lonlat(lon, lat))
@@ -471,7 +497,7 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
                     cor_type, cor_notes = "lot number", f'lot number {lots_to_correct} might be incorrect, the matched taxlot is {tID} for {trsqq_to_compare}'
                     print("lot numbers might be wrong...")
                 else:
-                    notes = 'lot numbers seem to be correct, need to review'
+                    notes = 'the record seems to be correct, need to review why it was not matched in match_wd_data_with_taxlot'
                     print(notes)
                     cor_type, cor_notes = None, notes
             else:
@@ -548,7 +574,8 @@ def trsqq_from_nearby_taxlot(x):
     get trsqq and txid from the correction notes
     """
     txid = x.split(', about')[0].replace('coordinate might be incorrect, nearby taxlot is ', '')
-    return trsqq_dict[txid], txid
+    trsqq = taxlot2trsqq(txid)
+    return trsqq, txid
 
 def review_unmatched_df_r2(df, taxlot, setID, ml, export=True):
     """
@@ -916,7 +943,8 @@ def create_ORTaxlot(cnt_code, trsqq, lot):
     """
     create the taxlot id based on the county code, township, range, section, and lot number
     """
-    taxlotID = str(cnt_code).zfill(2) + convert_trsqq(trsqq) + '--' + ('000000000' + lot)[-9:]
+    #print(cnt_code)
+    taxlotID = str(int(cnt_code)).zfill(2) + convert_trsqq(trsqq) + '--' + ('000000000' + lot)[-9:]
     return taxlotID
 
 def reindex_data(wd_dt):
@@ -938,6 +966,7 @@ def reindex_data(wd_dt):
     # get county code
     ndf.loc[:, 'cnt_code'] = ndf.county.map(cnt_dict)
     # get OR taxlot IDs for wd data
+    ndf = ndf[~ndf.cnt_code.isnull()]
     ndf.loc[:, 'ORTaxlot'] = ndf[['cnt_code', 'trsqq', 'lot']].apply(lambda row: create_ORTaxlot(cnt_code=row.cnt_code, trsqq=row.trsqq, lot=row.lot), axis = 1)
     return ndf
 
@@ -968,19 +997,25 @@ def clean_wd_table(setID, file):
     # this will help identify problematic records with numbers
     selectedID = wd_dt.parcel_id.astype(str) != 'nan'
     wd_dt.loc[selectedID, 'notes'] = wd_dt.copy()[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
-    ndf = reindex_data(wd_dt)
-    # get year from the receive date
-    ndf.loc[:, 'recyear'] = ndf.copy().received_date.apply(lambda x: x.year)
-    # get year from the wd ID 
-    ndf.loc[:, 'IDyear'] = ndf.wetdet_delin_number.apply(lambda x: x[2:6])
-    ndf.loc[selectedID, 'missinglot'] = ndf.loc[selectedID, 'parcel_id'].apply(lambda x: without_lots(x))
-    ndf['response_date'] = ndf['response_date'].dt.strftime("%Y-%m-%d")
-    ndf['received_date'] = ndf['received_date'].dt.strftime("%Y-%m-%d")
-    ndf['county'] = ndf['county'].apply(lambda x: x.title())
-    ndf = ndf[ndf.county.isin(OR_counties)]
-    end = time.time()
-    #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
-    return ndf
+    wd_dt['county'] = wd_dt['county'].apply(lambda x: x.title())
+    wd_dt = wd_dt[wd_dt.county.isin(OR_counties)]
+    if wd_dt.empty:
+        res = wd_dt
+    else:
+        ndf = reindex_data(wd_dt)
+        # get year from the receive date
+        ndf.loc[:, 'recyear'] = ndf.copy().received_date.apply(lambda x: x.year)
+        # get year from the wd ID 
+        ndf.loc[:, 'IDyear'] = ndf.wetdet_delin_number.apply(lambda x: x[2:6])
+        ndf.loc[selectedID, 'missinglot'] = ndf.loc[selectedID, 'parcel_id'].apply(lambda x: without_lots(x))
+        ndf['response_date'] = ndf['response_date'].dt.strftime("%Y-%m-%d")
+        ndf['received_date'] = ndf['received_date'].dt.strftime("%Y-%m-%d")
+        ndf['county'] = ndf['county'].apply(lambda x: x.title())
+        ndf = ndf[ndf.county.isin(OR_counties)]
+        end = time.time()
+        res = ndf
+        #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
+    return res
 
 def without_lots(text):
     """
