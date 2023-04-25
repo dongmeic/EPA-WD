@@ -17,4 +17,8 @@ Document the tasks and steps on the wetland delineation work funded by Environme
 6. Run `report_unmatched`, this will check how much is matched and export the unmatched records;
 
 ### Tier 2 - correct records with parcel ID
-1. Run `split_unmatched_df` and `review_unmatched_df_r2`
+1. Run `split_unmatched_df` and `review_unmatched_df_r2`;
+2. If there is any record reported "the record seems to be correct", review the wdtools functions to get the automatic match;
+3. Open "review_unmatched_Set004_r2_N_0.csv" and save it as Excel Workbook, select all and autofit the column width (under format) for better view;
+4. Mannually create the correction notes on Excel or on Jupter Notebook `notes_review_set4`, which will be saved as "unmatched_df_SetXXX_r2_N_notes.csv" (XXX as the set ID);
+5. 
