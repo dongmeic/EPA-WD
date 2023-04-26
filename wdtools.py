@@ -667,17 +667,18 @@ def correct_unmatched(df, setID, s, ml, export=True):
                 fields = notes.loc[sel1, 'field'].unique()
                 for field in fields:
                     sel2 = sel1 & (notes.field==field)
-                    if field == 'trsqq':
+                    if field == 'trsqq' & cor_type != 'trsqq':
                         df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
                         cor_types = notes.loc[sel2, 'cor_type'].values
                         for cor_type in cor_types:
                             sel3 = sel2 & (notes.cor_type==cor_type)
+                            repval = notes.loc[sel3, 'to'].values[0]
                             ind = trsqq_cor_dict[cor_type]
-                            df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x,
-                                                                                                index=ind,
-                                                                                                replacement=notes.loc[sel3, 'to'].values[0]))
+                            df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x, index=ind, replacement=repval))
                     else:
-                        df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0], notes.loc[sel2, 'to'].values[0]))
+                        valrep = notes.loc[sel2, 'from'].values[0]
+                        repval = notes.loc[sel2, 'to'].values[0]
+                        df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(valrep, repval))
         else:    
             sel = df.wetdet_delin_number == wdID
             fields = notes.loc[notes.wetdet_delin_number == wdID, 'field'].unique()
@@ -931,12 +932,36 @@ def get_s_code(x):
             s = nm1
     return s       
 
+def get_qq_code(x):
+    nms = re.findall('\d+', x)
+    lts = re.findall("[a-zA-Z]+", x)
+    if len(nms[2]) > 2:
+        if nms[2] == 4:
+            qq = nms[2][2:4]
+        else:
+            qq = nms[2][2] + '0'
+    elif len(lts) == 3:
+        if len(lts[2]) == 2:
+            qq = lts[2]
+        else:
+            qq = lts[2] + '0'
+    else:
+        if len(nms[0]) == 1:
+            t = '0' + nms[0]
+        if len(nms[1]) == 1:
+            r = '0' + nms[1]
+        if len(nms[2]) == 1:
+            s = '0' + nms[2]
+        trsqq = t + lts[0] + r + lts[1] + s
+        qq =  '{:0<10}'.format(trsqq)[8] + '{:0<10}'.format(trsqq)[9]
+    return qq
+
 def convert_trsqq(x):
     """
     convert township, range, section, and quarter-quarter to the taxlot id format
     """
     s = re.sub("V|X|Y|Z", "", x)
-    xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + '{:0<10}'.format(s)[8] + '{:0<10}'.format(s)[9]
+    xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + get_qq_code(x)
     return xt[:16]
 
 def create_ORTaxlot(cnt_code, trsqq, lot):
