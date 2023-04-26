@@ -948,10 +948,16 @@ def get_qq_code(x):
     else:
         if len(nms[0]) == 1:
             t = '0' + nms[0]
+        else:
+            t = nms[0]
         if len(nms[1]) == 1:
             r = '0' + nms[1]
+        else:
+            r = nms[1]
         if len(nms[2]) == 1:
             s = '0' + nms[2]
+        else:
+            s = nms[2]
         trsqq = t + lts[0] + r + lts[1] + s
         qq =  '{:0<10}'.format(trsqq)[8] + '{:0<10}'.format(trsqq)[9]
     return qq
