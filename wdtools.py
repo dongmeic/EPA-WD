@@ -488,9 +488,9 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
         if trsqq_to_compare_c == trsqq_to_check_c:
             print("trsqq matched, checking county code...")
             cnty_code = int(get_county_code_from_lonlat(lon, lat))
-            county_to_compare = [key for key, value in cnt_dict.items() if value == cnty_code]
+            county_to_compare = [key for key, value in cnt_dict.items() if value == cnty_code][0]
             # need to check the typos in the county name first
-            if county_to_check == county_to_compare[0]:
+            if county_to_check == county_to_compare:
                 print("county code is corrected, need to check lot numbers...")
                 if any([x not in lots_to_compare for x in lots_to_check]):
                     lots_to_correct = [x for x in lots_to_check if x not in lots_to_compare]
@@ -1175,7 +1175,7 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
         tdf = taxlot_tocheck.sort_values(by=['ORTaxlot', 'ydiff'])
         # keep the taxlot from the closest year
         tdf = tdf.drop_duplicates(subset='ORTaxlot', keep="first")
-        ndf = tocheck_df.merge(tdf[['ORTaxlot', 'geometry']], on='ORTaxlot')
+        ndf = tocheck_df.merge(tdf[['ORTaxlot', 'geometry']], on='ORTaxlot', how='left')
         ndf.rename(columns={'wetdet_delin_number': 'wdID', 
                       'address_location_desc':'loc_desc', 
                       'Coord-Source': 'coord_src',
