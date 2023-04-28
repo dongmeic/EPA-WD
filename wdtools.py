@@ -64,6 +64,55 @@ with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
 
 pd.options.mode.chained_assignment = None
 
+################################################ Report #########################################################
+
+def count_lst_ele(lst, ctnm):
+    """
+    count list elements
+    ctnm - count number
+    """
+    qaqc_cnt = [*map(wdcnt_dict.get, lst)]
+    freq = Counter(qaqc_cnt)
+    df = pd.DataFrame(sorted(freq.items()))
+    df.columns = ['county', ctnm]
+    return df
+
+def read_list(setid):
+    """
+    read a list 
+    """
+    with open(os.path.join(inpath, f"{setid}_mapped.pkl"), "rb") as f:
+        lst = pickle.load(f)
+    return lst
+
+# clean all formats
+def removeFormatting(ws):
+    """
+    remove Excel format
+    """
+    # ws is not the worksheet name, but the worksheet object
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.style = 'Normal'
+    return ws
+
+def reformat(file):
+    """
+    reformat Excel
+    """    
+    dat = pd.read_excel(file)
+    wb = openpyxl.load_workbook(file)
+    ws = wb.active
+    ws = removeFormatting(ws)
+    wb.save(file)
+    print("Removed format")
+    excel = Dispatch('Excel.Application')
+    wb = excel.Workbooks.Open(file)
+    excel.Worksheets(1).Activate()
+    excel.ActiveSheet.Columns.AutoFit()
+    wb.Close(True)
+    print("Autofitted columns...")
+    
 ################################################ Tier 3 & 4 #####################################################
 
 def writelist(lst, lstnm, setID):
@@ -73,10 +122,11 @@ def writelist(lst, lstnm, setID):
     with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
             pickle.dump(lst, f)
 
-def review_loop_r1(df):
+def review_loop_r1(setID):
     """
     loop through the unmatched records and check the original records
     """
+    df = pd.read_csv(os.path.join(inpath + f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
     for wdID in df.wetdet_delin_number.unique():
         print(wdID)
         print(check_unmatched_r1(wdID = wdID, df = df))
@@ -91,6 +141,7 @@ def review_loop_r1(df):
 def check_unmatched_r1(wdID, df):
     """
     check unmatched records for a given WDID
+    df is from the splited unmatched records from r1 process
     """
     url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
     selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes']
@@ -100,10 +151,12 @@ def check_unmatched_r1(wdID, df):
         webbrowser.open(url)
     return df.loc[df.wetdet_delin_number == wdID, selcols]
 
-def review_loop(df):
+def review_loop(setID):
     """
     loop through the unmatched records and check the review notes
+    df is from r2 notes
     """
+    df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_N_0.csv'))
     df = df.reset_index()
     for i in range(df.shape[0]):
         wdID = df.loc[i, 'wetdet_delin_number']
