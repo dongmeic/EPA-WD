@@ -802,12 +802,18 @@ def adjust_taxlot_df(df):
     return df
 
 def run_Tier2_step1(setID, unmatched_df, all_taxlot):
+    """
+    split unmatched records
+    """
     r1_df, r2_df = split_unmatched_df(unmatched_df, ml='N', setID=setID)
     rev_r2 = review_unmatched_df_r2(r2_df, all_taxlot, setID, ml='N', export=True)
     taxlots_to_review = get_taxlot_to_check_r2(rev_r2, all_taxlot, setID, ml='N')
     return r1_df, r2_df
 
 def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
+    """
+    update the match
+    """
     cor_r1 = correct_unmatched(r1_df, setID, s='r1', ml='N', export=True)
     cor_r2 = correct_unmatched(r2_df, setID, s='r2', ml='N', export=True)
     df = combine_corrected_unmatched(setID, ml='N')
@@ -818,6 +824,21 @@ def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
     wd_toReview = wd[wd.wetdet_delin_number.isin(matched_toReview.wdID.unique())]
     wd_toReview.to_csv(outpath + f'\\to_review\\partial_matched_{setID}.csv', index=False)
     return matched, unmatched_df
+
+def report2DSL(setID):
+    """
+    generate the correction report for DSL
+    """
+    r2_0 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_N_0.csv'))
+    r1_notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r1_N_notes.csv'))
+    r2_notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_N_notes.csv'))
+    cordf = r1_notes.append(r2_notes, ignore_index=True)
+    matched = gpd.read_file(outpath + f'\\matched\\matched_records_{setID}.shp')
+    corrected = matched[matched.record_ID.isin(cordf.record_ID.values)][['wdID','trsqq', 'parcel_id', 'record_ID']].drop_duplicates(ignore_index=True)
+    report = cordf.merge(corrected[['trsqq', 'parcel_id', 'record_ID']], on='record_ID')
+    report['trsqq'] = report.trsqq.apply(lambda x: x.rstrip('0'))
+    report.to_csv(outpath + f'\\corrected\\corrected_{setID}.csv', index=False)
+    return report
     
 ################################################ Tier 1 #####################################################
 # gdf below generally refers to the matched records
@@ -1555,6 +1576,9 @@ def reorganize_tocheck(tocheck_df):
     return tocheck_df, torematch_df
 
 def run_Tier1(setID, nm_to_add, all_taxlot):
+    """
+    initial match
+    """
     wd = combine_wd_tables(setID, nm_to_add)
     setdf = combined_reindexed_data(setID, nm_to_add)
     # this might take a while
