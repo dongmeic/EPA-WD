@@ -27,6 +27,7 @@ import json
 google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
+outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output'
 wdpath = inpath + '\\DSL data originals'
 txpath = inpath + '\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years'
 yearstart = 2016
@@ -667,14 +668,19 @@ def correct_unmatched(df, setID, s, ml, export=True):
                 fields = notes.loc[sel1, 'field'].unique()
                 for field in fields:
                     sel2 = sel1 & (notes.field==field)
-                    if field == 'trsqq' & cor_type != 'trsqq':
+                    if field == 'trsqq':
                         df.loc[sel, field] = df.loc[sel, field].apply(lambda x: pad_string(x))
                         cor_types = notes.loc[sel2, 'cor_type'].values
                         for cor_type in cor_types:
                             sel3 = sel2 & (notes.cor_type==cor_type)
                             repval = notes.loc[sel3, 'to'].values[0]
-                            ind = trsqq_cor_dict[cor_type]
-                            df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x, index=ind, replacement=repval))
+                            if cor_type != 'trsqq':
+                                ind = trsqq_cor_dict[cor_type]
+                                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x, index=ind, replacement=repval))
+                            else:
+                                valrep = notes.loc[sel3, 'from'].values[0]
+                                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(valrep, repval))
+                                
                     else:
                         valrep = notes.loc[sel2, 'from'].values[0]
                         repval = notes.loc[sel2, 'to'].values[0]
@@ -705,6 +711,7 @@ def correct_unmatched(df, setID, s, ml, export=True):
 # need to run review_unmatched_df_r2 and do some manual work frist to get the notes
 def update_unmatched_df_r2(df, setID, ml, export=True):
     """
+    combine corrected and uncorrected in the unmatched r2 records
     df: the second output from split_unmatched_df
     setID: the setID
     ml (missing lot): whether the unmatched records are missing parcel id in digit
@@ -726,14 +733,18 @@ def update_unmatched_df_r2(df, setID, ml, export=True):
         rdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'), index=False)
     return rdf
 
-def combine_corrected_unmatched(setID,ml,export=True):
+def combine_corrected_unmatched(setID, ml, skip=True, export=True):
     """
     combine the output from correct_unmatched and update_unmatched_df_r2
     setID: the setID of the unmatched records
     ml (missing lot): whether the unmatched records are missing parcel id in digit
     """
     rev_df1 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r1_{ml}_1.csv'))
-    rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'))
+    # if skip update_unmatched_df_r2
+    if skip:
+        rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_1.csv'))
+    else:    
+        rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'))
     df = rev_df1.append(rev_df2, ignore_index = True)
     if export:
         df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{ml}.csv'), index=False)
@@ -790,6 +801,24 @@ def adjust_taxlot_df(df):
     df.loc[:, 'ORTaxlot'] = df.copy()[['trsqq', 'ORTaxlot']].apply(lambda row: adjust_taxlot(row.trsqq, row.ORTaxlot), axis=1)
     return df
 
+def run_Tier2_step1(setID, unmatched_df, all_taxlot):
+    r1_df, r2_df = split_unmatched_df(unmatched_df, ml='N', setID=setID)
+    rev_r2 = review_unmatched_df_r2(r2_df, all_taxlot, setID, ml='N', export=True)
+    taxlots_to_review = get_taxlot_to_check_r2(rev_r2, all_taxlot, setID, ml='N')
+    return r1_df, r2_df
+
+def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
+    cor_r1 = correct_unmatched(r1_df, setID, s='r1', ml='N', export=True)
+    cor_r2 = correct_unmatched(r2_df, setID, s='r2', ml='N', export=True)
+    df = combine_corrected_unmatched(setID, ml='N')
+    rev_df = reindex_data(df)
+    matched = match_wd_data_with_taxlot(rev_df, setID, all_taxlot, export=True, update=True)
+    unmatched_df = report_unmatched(matched, setID, nm_to_add, mute = False)
+    matched_toReview = matched[matched.notes.notnull()] 
+    wd_toReview = wd[wd.wetdet_delin_number.isin(matched_toReview.wdID.unique())]
+    wd_toReview.to_csv(outpath + f'\\to_review\\partial_matched_{setID}.csv', index=False)
+    return matched, unmatched_df
+    
 ################################################ Tier 1 #####################################################
 # gdf below generally refers to the matched records
 def list_files(path, folder=False):
@@ -1524,3 +1553,15 @@ def reorganize_tocheck(tocheck_df):
     trsqq_dict = res[1]
     torematch_df.loc[:, 'ORTaxlot'] = torematch_df.trsqq_n.apply(lambda x: [*map(trsqq_dict.get, x)][0])
     return tocheck_df, torematch_df
+
+def run_Tier1(setID, nm_to_add, all_taxlot):
+    wd = combine_wd_tables(setID, nm_to_add)
+    setdf = combined_reindexed_data(setID, nm_to_add)
+    # this might take a while
+    start = time.time()
+    # export = False
+    setgdf = match_wd_data_with_taxlot(setdf, setID, all_taxlot, export=True)
+    end = time.time()
+    print(f'it took {round((end - start)/60, 0)} minutes to complete')
+    unmatched_df = report_unmatched(setgdf, setID, nm_to_add, mute = False, export=True)
+    return wd, setgdf, unmatched_df
