@@ -17,7 +17,7 @@ from geopy.geocoders import Nominatim
 from urllib.request import urlopen
 import io
 import requests
-from PyPDF2 import PdfFileReader, PdfFileWriter
+from PyPDF2 import PdfReader, PdfWriter
 import fiona
 import webbrowser
 import time
@@ -122,21 +122,32 @@ def writelist(lst, lstnm, setID):
     with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
             pickle.dump(lst, f)
 
-def review_loop_r1(setID):
+def review_loop_r1(setID=None, df=None, partial=False, idx=False):
     """
     loop through the unmatched records and check the original records
     """
-    df = pd.read_csv(os.path.join(inpath + f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
+    toadd=[]
+    if not partial:
+        df = pd.read_csv(os.path.join(inpath + f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
     for wdID in df.wetdet_delin_number.unique():
         print(wdID)
+        if idx:
+            print(f'index = {df[df.wetdet_delin_number==wdID].index[0]+1}')
         print(check_unmatched_r1(wdID = wdID, df = df))
-        user_input = input("Press 'p' to pause or any other key to continue...")
+        user_input = input("Press 'p' to pause or any key to stop...")
         if user_input == 'p':
             while True:
-                user_input = input("Press 'c' to continue...")
+                user_input = input("Press 'a' to add the wd record or 'c' to continue...")
+                if user_input == 'a':
+                    toadd.append(wdID)
+                    break
                 if user_input == 'c':
                     break
+        else:
+            break
         time.sleep(1)
+    if toadd != []:
+        return toadd
 
 def check_unmatched_r1(wdID, df):
     """
@@ -185,6 +196,7 @@ def check_review_notes_r2n(wdID, df):
 def check_completeness(setID='003', a=3):
     """
     check completeness of the mapping
+    a: numbers to add, for the records that are edited in the matched records directly
     """
     revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\Set{setID}.gdb'
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
@@ -201,11 +213,11 @@ def extract_page_from_locPath(filePath, pageNm, wdID):
     """
     Extract a page from a pdf file from a local path
     """
-    pdf_file = PdfFileReader(filePath)
-    pageObj = pdf_file.getPage(pageNm)
-    pdf_writer = PdfFileWriter()
+    pdf_file = PdfReader(filePath)
+    pageObj = pdf_file.getPage(pageNm-1)
+    pdf_writer = PdfWriter()
     pdf_writer.addPage(pageObj)
-    output = f'{pdf_outpath}\\{wdID}_{pageNm+1}.pdf'
+    output = f'{pdf_outpath}\\{wdID}_{pageNm}.pdf'
     with open(output, 'wb') as output_pdf:
         pdf_writer.write(output_pdf) 
 
@@ -215,11 +227,11 @@ def extract_page_from_docLink(url, pageNm, wdID):
     """
     response = requests.get(url=url, timeout=120)
     on_fly_mem_obj = io.BytesIO(response.content)
-    pdf_file = PdfFileReader(on_fly_mem_obj)
-    pageObj = pdf_file.getPage(pageNm)
-    pdf_writer = PdfFileWriter()
+    pdf_file = PdfReader(on_fly_mem_obj)
+    pageObj = pdf_file.getPage(pageNm-1)
+    pdf_writer = PdfWriter()
     pdf_writer.addPage(pageObj)
-    output = f'{pdf_outpath}\\{wdID}_{pageNm+1}.pdf'
+    output = f'{pdf_outpath}\\{wdID}_{pageNm}.pdf'
     with open(output, 'wb') as output_pdf:
         pdf_writer.write(output_pdf) 
 
