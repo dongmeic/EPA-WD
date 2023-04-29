@@ -135,13 +135,13 @@ def review_loop_r1(setID=None, df=None, partial=False, idx=False):
             print(f'index = {df[df.wetdet_delin_number==wdID].index[0]+1}')
         print(check_unmatched_r1(wdID = wdID, df = df))
         user_input = input("Press 'p' to pause or any key to stop...")
-        if user_input == 'p':
+        if user_input in ['p', 'P']:
             while True:
                 user_input = input("Press 'a' to add the wd record or 'c' to continue...")
-                if user_input == 'a':
+                if user_input in ['a', 'A']:
                     toadd.append(wdID)
                     break
-                if user_input == 'c':
+                if user_input in ['c', 'C']:
                     break
         else:
             break
@@ -174,10 +174,10 @@ def review_loop(setID):
         print(wdID)
         print(check_review_notes_r2n(wdID = wdID, df = df))
         user_input = input("Press 'p' to pause or any other key to continue...")
-        if user_input == 'p':
+        if user_input in ['p', 'P']:
             while True:
                 user_input = input("Press 'c' to continue...")
-                if user_input == 'c':
+                if user_input in ['c', 'C']:
                     break
         time.sleep(1)
 
