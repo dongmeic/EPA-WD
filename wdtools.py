@@ -122,14 +122,19 @@ def writelist(lst, lstnm, setID):
     with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
             pickle.dump(lst, f)
 
-def review_loop_r1(setID=None, df=None, partial=False, idx=False):
+def review_loop_r1(setID=None, df=None, partial=False, idx=False, wd_id=None):
     """
     loop through the unmatched records and check the original records
     """
     toadd=[]
     if not partial:
         df = pd.read_csv(os.path.join(inpath + f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
-    for wdID in df.wetdet_delin_number.unique():
+    wdid_list = list(df.wetdet_delin_number.unique())
+    n = len(wdid_list)
+    i =  wdid_list.index(wd_id)
+    for wdID in wdid_list[i+1:]:
+        j = wdid_list.index(wdID)
+        print(f'{round(((j/n)*100),1)}% digitized, {n-j} records remained, expected to be done in about {int(((n-j)*0.8)+0.5)} hours...')
         print(wdID)
         if idx:
             print(f'index = {df[df.wetdet_delin_number==wdID].index[0]+1}')
@@ -225,15 +230,18 @@ def extract_page_from_docLink(url, pageNm, wdID):
     """
     Extract a page from a pdf file from a url
     """
-    response = requests.get(url=url, timeout=120)
-    on_fly_mem_obj = io.BytesIO(response.content)
-    pdf_file = PdfReader(on_fly_mem_obj)
-    pageObj = pdf_file.getPage(pageNm-1)
-    pdf_writer = PdfWriter()
-    pdf_writer.addPage(pageObj)
-    output = f'{pdf_outpath}\\{wdID}_{pageNm}.pdf'
-    with open(output, 'wb') as output_pdf:
-        pdf_writer.write(output_pdf) 
+    if str(url) == 'nan':
+        print('Decision link is not available')
+    else:
+        response = requests.get(url=url, timeout=120)
+        on_fly_mem_obj = io.BytesIO(response.content)
+        pdf_file = PdfReader(on_fly_mem_obj)
+        pageObj = pdf_file.getPage(pageNm-1)
+        pdf_writer = PdfWriter()
+        pdf_writer.addPage(pageObj)
+        output = f'{pdf_outpath}\\{wdID}_{pageNm}.pdf'
+        with open(output, 'wb') as output_pdf:
+            pdf_writer.write(output_pdf) 
 
 def review_mapped(setID):
     """
