@@ -131,7 +131,10 @@ def review_loop_r1(setID=None, df=None, partial=False, idx=False, wd_id=None):
         df = pd.read_csv(os.path.join(inpath + f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
     wdid_list = list(df.wetdet_delin_number.unique())
     n = len(wdid_list)
-    i =  wdid_list.index(wd_id)
+    if wd_id is None:
+        i = -1
+    else:
+        i =  wdid_list.index(wd_id)
     for wdID in wdid_list[i+1:]:
         j = wdid_list.index(wdID)
         print(f'{round(((j/n)*100),1)}% digitized, {n-j} records remained, expected to be done in about {int(((n-j)*0.8)+0.5)} hours...')
@@ -160,7 +163,7 @@ def check_unmatched_r1(wdID, df):
     df is from the splited unmatched records from r1 process
     """
     url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
-    selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes']
+    selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes', 'missinglot']
     if str(url) == 'nan':
         print('Decision link is not available')
     else:
@@ -286,23 +289,32 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     Combine the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
     """
     revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    # get separated feature files
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
+    # get digitized partially-matched files
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     partial = partial.to_crs(epsg=2992)
     gdf = merge_single_partial_file(setID=setID, wIDlist=mapped0)
     dat = gdf.append(partial, ignore_index=True)
+    dat = dat[['wdID', 'geometry']].dissolve('wdID')
+    # get edited feature in the original matches
     edited_gdf = matched[matched.wdID.isin(editedIDs)]
     edited_gdf = edited_gdf[['wdID', 'geometry']].dissolve('wdID')
     edited_gdf.loc[:, 'wdID'] = edited_gdf.index
+    # merge digitized or edited features
     data1 = edited_gdf.append(dat[['wdID', 'geometry']], ignore_index=True)
     matched_df = matched[['wdID', 'geometry']].dissolve('wdID')
     matched_df.loc[:, 'wdID'] = matched_df.index
+    # exclude the ones that were digitized or edited in the original matches
     excluded = [wdID for wdID in data1.wdID.unique() if wdID in matched_df.wdID.unique()]
     issues = pd.read_csv(os.path.join(inpath, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
+    # exclude the ones that have issues
     issueIDs = list(issues.wetdet_delin_number.unique())
     matched_gdf = matched_df[~matched_df.wdID.isin(excluded+issueIDs)]
+    # merge matched and digitized/edited
     data2 = matched_gdf.append(data1, ignore_index=True)
+    # merge the ones without lot IDs
     wo_lot = gpd.read_file(revpath, layer=f'{setID}_wo_lot')
     wo_lot = wo_lot.to_crs(epsg=2992)
     wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
