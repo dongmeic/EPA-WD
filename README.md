@@ -37,3 +37,6 @@ Detailed steps:
 ### Tier 3 & 4 - digitize the partial and unmatched records
 
 ### Report
+1. Combine digitized and matched records, including WD ID;
+2. Review unmatched or issue IDs;
+3. Get the deliverables including the matched or digitized WD records and the issues.

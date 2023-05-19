@@ -23,7 +23,15 @@ import webbrowser
 import time
 import googlemaps
 import json
+import openpyxl
+from collections import Counter
+from datetime import date
+from win32com.client import Dispatch
+from shapely.validation import make_valid
+import warnings
+from shapely.errors import ShapelyDeprecationWarning
 
+warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
@@ -65,13 +73,18 @@ with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
 pd.options.mode.chained_assignment = None
 
 ################################################ Report #########################################################
+def flatten(l):
+    """
+    convert lists in list to a list
+    """
+    return [item for sublist in l for item in sublist]
 
-def count_lst_ele(lst, ctnm):
+def count_lst_ele(dct, lst, ctnm):
     """
     count list elements
     ctnm - count number
     """
-    qaqc_cnt = [*map(wdcnt_dict.get, lst)]
+    qaqc_cnt = [*map(dct.get, lst)]
     freq = Counter(qaqc_cnt)
     df = pd.DataFrame(sorted(freq.items()))
     df.columns = ['county', ctnm]
@@ -122,14 +135,19 @@ def writelist(lst, lstnm, setID):
     with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
             pickle.dump(lst, f)
 
-def review_loop_r1(setID=None, df=None, partial=False, idx=False, wd_id=None):
+def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False, wd_id=None, wddf=None):
     """
     loop through the unmatched records and check the original records
     """
     toadd=[]
     if not partial:
         df = pd.read_csv(os.path.join(inpath + f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
-    wdid_list = list(df.wetdet_delin_number.unique())
+    if df is not None:
+        wdid_list = list(df.wetdet_delin_number.unique())
+    else:
+        if wdid_list is None:
+            print("need to provide a list of wdID..")
+            return None
     n = len(wdid_list)
     if wd_id is None:
         i = -1
@@ -140,8 +158,12 @@ def review_loop_r1(setID=None, df=None, partial=False, idx=False, wd_id=None):
         print(f'{round(((j/n)*100),1)}% digitized, {n-j} records remained, expected to be done in about {int(((n-j)*0.8)+0.5)} hours...')
         print(wdID)
         if idx:
-            print(f'index = {df[df.wetdet_delin_number==wdID].index[0]+1}')
-        print(check_unmatched_r1(wdID = wdID, df = df))
+            if df is not None:
+                print(f'index = {df[df.wetdet_delin_number==wdID].index[0]+1}')
+                print(check_unmatched_r1(wdID = wdID, df = df))
+            else:
+                print(f'index = {wdid_list.index(wdID)+1}')
+                print(check_unmatched_r1(wdID = wdID, df = wddf)) 
         user_input = input("Press 'p' to pause or any key to stop...")
         if user_input in ['p', 'P']:
             while True:
@@ -217,7 +239,7 @@ def check_completeness(setID='003', a=3):
     print(f'{round(pct*100, 1)}% completed...')
     return sorted(mapped), len(mapped)
 
-def extract_page_from_locPath(filePath, pageNm, wdID):
+def extract_page_from_locPath(filePath, pageNm, wdID, k=0):
     """
     Extract a page from a pdf file from a local path
     """
@@ -225,7 +247,7 @@ def extract_page_from_locPath(filePath, pageNm, wdID):
     pageObj = pdf_file.getPage(pageNm-1)
     pdf_writer = PdfWriter()
     pdf_writer.addPage(pageObj)
-    output = f'{pdf_outpath}\\{wdID}_{pageNm}.pdf'
+    output = f'{pdf_outpath}\\{wdID}_{pageNm+k}.pdf'
     with open(output, 'wb') as output_pdf:
         pdf_writer.write(output_pdf) 
 
@@ -258,6 +280,14 @@ def review_mapped(setID):
             if len(gdf.wdID.unique()) > 1:
                 print(wID)
 
+def rename_wdID(x):
+    """
+    Replace underscore with dash
+    """
+    if '_' in x:
+        x = x.replace('_', '-')
+    return x
+
 def revise_single_partial_file(setID, wID):
     """
     Revise the geometry of a single partial taxlot
@@ -268,6 +298,7 @@ def revise_single_partial_file(setID, wID):
     selcols = ['Shape_Length', 'Shape_Area']
     if 'wdID' in gdf.columns:
         df = gdf.copy()[selcols +  ['wdID']]
+        df.loc[:, 'wdID'] = df.wdID.apply(lambda x: rename_wdID(x))
     else:
         df = gdf.copy()[selcols]
         df.loc[:,'wdID'] = wID.replace('_', '-')
@@ -297,34 +328,40 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     partial = partial.to_crs(epsg=2992)
     gdf = merge_single_partial_file(setID=setID, wIDlist=mapped0)
     dat = gdf.append(partial, ignore_index=True)
-    dat = dat[['wdID', 'geometry']].dissolve('wdID')
+    if dat.shape[0] > len(dat.wdID.unique()):
+        dat = dat[['wdID', 'geometry']].dissolve('wdID')
+        dat.loc[:, 'wdID'] = dat.index
     # get edited feature in the original matches
     edited_gdf = matched[matched.wdID.isin(editedIDs)]
     edited_gdf = edited_gdf[['wdID', 'geometry']].dissolve('wdID')
     edited_gdf.loc[:, 'wdID'] = edited_gdf.index
     # merge digitized or edited features
     data1 = edited_gdf.append(dat[['wdID', 'geometry']], ignore_index=True)
-    matched_df = matched[['wdID', 'geometry']].dissolve('wdID')
-    matched_df.loc[:, 'wdID'] = matched_df.index
-    # exclude the ones that were digitized or edited in the original matches
-    excluded = [wdID for wdID in data1.wdID.unique() if wdID in matched_df.wdID.unique()]
-    issues = pd.read_csv(os.path.join(inpath, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
-    # exclude the ones that have issues
-    issueIDs = list(issues.wetdet_delin_number.unique())
-    matched_gdf = matched_df[~matched_df.wdID.isin(excluded+issueIDs)]
-    # merge matched and digitized/edited
-    data2 = matched_gdf.append(data1, ignore_index=True)
     # merge the ones without lot IDs
     wo_lot = gpd.read_file(revpath, layer=f'{setID}_wo_lot')
     wo_lot = wo_lot.to_crs(epsg=2992)
+    data2 = data1.append(wo_lot[['wdID', 'geometry']], ignore_index=True)
+    data2['code'] = 1
+    # exclude the ones that were digitized or edited in the original matches
+    excluded = [wdID for wdID in data2.wdID.unique() if wdID in matched.wdID.unique()]
+    issues = pd.read_csv(os.path.join(inpath, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
+    # exclude the ones that have issues
+    issueIDs = list(issues.wetdet_delin_number.unique())
+    matched_gdf = matched[~matched.wdID.isin(excluded+issueIDs)]
+    matched_gdf['code'] = 0
+    # merge matched and digitized/edited
+    data3 = matched_gdf[['wdID', 'code', 'geometry']].append(data2[['wdID', 'code', 'geometry']], ignore_index=True)
+    shp = data3.copy()
+    shp.geometry = shp.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+    final_gdf = shp.dissolve('wdID')
+    final_gdf.loc[:, 'wdID'] = final_gdf.index
     wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
-    data3 = data2.append(wo_lot[['wdID', 'geometry']], ignore_index=True)
-    unmatchedIDs = [wdID for wdID in wd.wetdet_delin_number.unique() if wdID not in data3.wdID.unique()]
+    unmatchedIDs = [wdID for wdID in wd.wetdet_delin_number.unique() if wdID not in final_gdf.wdID.unique()]
     toCheck = [ID for ID in unmatchedIDs if ID not in issueIDs]
     digitized_nIDs = len(editedIDs) + len(dat.wdID.unique()) + len(wo_lot.wdID.unique())
     if export:
-        data3.to_file(os.path.join(inpath, "output", "final", f"mapped_wd_{setID}.shp"))
-    return data3, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
+        final_gdf.to_file(os.path.join(inpath, "output", "final", f"mapped_wd_{setID}.shp"), index=False)
+    return final_gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
 
 ################################################ Tier 2 #####################################################
 def get_point_from_lonlat(lon, lat, transprj=True, export=True):
