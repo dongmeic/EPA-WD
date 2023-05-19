@@ -363,6 +363,25 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
         final_gdf.to_file(os.path.join(inpath, "output", "final", f"mapped_wd_{setID}.shp"), index=False)
     return final_gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
 
+def run_Tier3_4_final(setID, nm_to_add):
+    """
+    combine matched and digitized records and review
+    """
+    start = time.time()
+    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
+    matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
+    mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
+    partial = gpd.read_file(revpath, layer=f'{setID}_partial')
+    with open(outpath+f'\\matched\\{setID}_edited.txt') as f:
+        edited = f.readlines()
+    gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs = combine_matched_digitized(setID=setID, 
+                                                                                     editedIDs=edited[0].split(", "), 
+                                                                                     nm_to_add=nm_to_add)
+    end = time.time()
+    print(f'it took {round((end - start)/60, 0)} minutes to complete')
+    return gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
+
 ################################################ Tier 2 #####################################################
 def get_point_from_lonlat(lon, lat, transprj=True, export=True):
     """
