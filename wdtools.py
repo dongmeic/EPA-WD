@@ -366,6 +366,7 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
 def run_Tier3_4_final(setID, nm_to_add):
     """
     combine matched and digitized records and review
+    gdf: the final shapefile that combined both automatic matches and digitized records
     """
     start = time.time()
     revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'

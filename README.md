@@ -39,4 +39,9 @@ Detailed steps:
 ### Report
 1. Combine digitized and matched records, including WD ID;
 2. Review unmatched or issue IDs;
-3. Get the deliverables including the matched or digitized WD records and the issues.
+3. Get the deliverables including the matched or digitized WD records;
+4. Report the issues for final digitizing work in needed.
+
+## Notes
+
+The scripts are organized to run by set. A set is collected when DSL sends data at certain time following their master schedule. 
