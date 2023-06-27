@@ -48,6 +48,7 @@ cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 OR_counties = list(cnt_dict.keys())
+nm2add = [0, 1420, 2143, 2878]
 
 def read_trsqq():
     """
@@ -72,7 +73,29 @@ with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
 
 pd.options.mode.chained_assignment = None
 
+################################################ Deliverable #########################################################
+
+def get_all_wd(num):
+    frames = []
+    for i in range(num):
+        wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i])
+        wd_dt['SetID'] = i+1
+        frames.append(wd_dt)
+    wd_df = pd.concat(frames, ignore_index=True)
+    return wd_df
+
+def get_all_SA(num):
+    frames = []
+    for i in range(num):
+        sa_dt = gpd.read_file(outpath + f'\\final\\mapped_wd_Set00{i+1}.shp')
+        sa_dt['SetID'] = i+1
+        frames.append(sa_dt)
+    sa_df = pd.concat(frames, ignore_index=True)
+    sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
+    return sa_gdf
+
 ################################################ Report #########################################################
+
 def flatten(l):
     """
     convert lists in list to a list
@@ -323,6 +346,11 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     # get separated feature files
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
+    # get edited feature in the original matches
+    edited_gdf = matched[matched.wdID.isin(editedIDs)]
+    edited_gdf = edited_gdf[['wdID', 'geometry']].dissolve('wdID')
+    edited_gdf.loc[:, 'wdID'] = edited_gdf.index
+    edited_gdf['code'] = 1
     # get digitized partially-matched files
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     partial = partial.to_crs(epsg=2992)
@@ -331,17 +359,13 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     if dat.shape[0] > len(dat.wdID.unique()):
         dat = dat[['wdID', 'geometry']].dissolve('wdID')
         dat.loc[:, 'wdID'] = dat.index
-    # get edited feature in the original matches
-    edited_gdf = matched[matched.wdID.isin(editedIDs)]
-    edited_gdf = edited_gdf[['wdID', 'geometry']].dissolve('wdID')
-    edited_gdf.loc[:, 'wdID'] = edited_gdf.index
-    # merge digitized or edited features
-    data1 = edited_gdf.append(dat[['wdID', 'geometry']], ignore_index=True)
     # merge the ones without lot IDs
     wo_lot = gpd.read_file(revpath, layer=f'{setID}_wo_lot')
     wo_lot = wo_lot.to_crs(epsg=2992)
-    data2 = data1.append(wo_lot[['wdID', 'geometry']], ignore_index=True)
-    data2['code'] = 1
+    # merge digitized or edited features
+    data1 = wo_lot.append(dat[['wdID', 'geometry']], ignore_index=True)
+    data1['code'] = 2
+    data2 = edited_gdf.append(data1[['wdID', 'code', 'geometry']], ignore_index=True)
     # exclude the ones that were digitized or edited in the original matches
     excluded = [wdID for wdID in data2.wdID.unique() if wdID in matched.wdID.unique()]
     issues = pd.read_csv(os.path.join(inpath, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
