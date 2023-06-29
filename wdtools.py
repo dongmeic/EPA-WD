@@ -75,6 +75,28 @@ pd.options.mode.chained_assignment = None
 
 ################################################ Deliverable #########################################################
 
+def replace_geometry(gdf):
+    """
+    to replace the geometry of SA ploygons with manual review
+    gdf is the geodataframe that contains the SA polygons to replace
+    rid is record ID
+    """
+    revpath = inpath + '\\GIS\\ArcGIS Pro Project\\DataReview\\DataReview.gdb'
+    newplys = [lyr for lyr in fiona.listlayers(revpath) if 'rid' in lyr]
+    frames = []
+    for nply in newplys:
+        newply = gpd.read_file(revpath, layer=nply)
+        rid = int(nply.replace('rid', ''))
+        newply['record_ID'] = rid
+        frames.append(newply[['record_ID', 'geometry']])
+    sa_df = pd.concat(frames, ignore_index=True)
+    sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
+    selrids = sa_df.record_ID.unique()
+    df = gdf.drop(columns=['geometry'])
+    gdf1 = df[df.record_ID.isin(selrids)].merge(sa_gdf,on='record_ID')
+    gdf2 = pd.concat([gdf[~gdf.record_ID.isin(selrids)], gdf1], ignore_index=True)
+    return gdf2
+    
 def split_WD_to_records(df, gdf, wdID, mapindex, taxlots):
     """
     this function splits the WD SA ploygons to ploygons by records
