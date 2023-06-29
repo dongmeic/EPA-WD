@@ -75,7 +75,102 @@ pd.options.mode.chained_assignment = None
 
 ################################################ Deliverable #########################################################
 
+def split_WD_to_records(df, gdf, wdID, mapindex, taxlots):
+    """
+    this function splits the WD SA ploygons to ploygons by records
+    df is the dataframe that contains the selected WD ID and wetdet_delin_number in the columns
+    gdf is the geodataframe that contains the selected WD ID
+    mapindex is the taxmap geodataframe of the year
+    taxlots are the taxlots of the year
+    """
+    selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
+                    'city', 'county', 'site_name', 'site_desc','latitude',
+                    'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
+                    'status_name', 'received_date', 'response_date','reissuance_response_date', 
+                    'project_id', 'site_id','SetID','record_ID', 'ORMapNum']
+    ndf = df[df.wetdet_delin_number==wdID]
+    cnts = ndf.county.unique()
+    if len(cnts) > 1:
+        print("WD crosses counties!")
+        return None
+    elif cnts not in OR_counties:
+        print(f"Check the county name {cnts[0]}!")
+        return None
+    else:
+        setID = ndf.SetID.values[0]
+        print(f"WD {wdID} is in County {cnts[0]} in Set {setID}...")
+        ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, 
+                                                                          trsqq=row.trsqq), 
+                                               axis = 1)
+        trsqq_list, n = check_duplicates(ndf.trsqq.values)
+        ngdf = split_WD_to_taxmaps(gdf=gdf, wdID=wdID, mapindex=mapindex)
+        if n > 0:
+            frames = []
+            for trsqq in trsqq_list:
+                inter = split_taxmap_to_records(df=ndf, gdf=ngdf, trsqq=trsqq, taxlots=taxlots)
+                frames.append(inter)
+            # idf is intersection data frame
+            idf = pd.concat(frames, ignore_index=True)
+            idf = idf[['geometry', 'record_ID']].merge(ndf[selectedvars],on='record_ID', how='left')
+            idf['code'] = ngdf.code.values[0]
+            # odf is the other dataframe that excludes intersection taxmaps
+            ogdf=ngdf[~ngdf.ORMapNum.isin(idf.ORMapNum)][['ORMapNum', 'geometry', 'code']]
+            odf=ndf[~ndf.ORMapNum.isin(idf.ORMapNum)][selectedvars]
+            odf=ogdf.merge(odf, on='ORMapNum', how='left')
+            selectedvars.extend(['code', 'geometry'])
+            out=pd.concat([idf[selectedvars], odf[selectedvars]])
+        else:
+            out=ndf.merge(ngdf[['ORMapNum', 'geometry', 'code']], on='ORMapNum', how='left')
+            selectedvars.append('code')
+            out=out[selectedvars]
+        out = gpd.GeoDataFrame(out, geometry='geometry')
+        out = out.dissolve('record_ID')
+        out['record_ID'] = out.index
+        out.reset_index(drop=True, inplace=True)
+        return out
+
+def split_WD_to_taxmaps(gdf, wdID, mapindex):
+    """
+    this function splits the WD SA ploygons by taxmap
+    gdf is the geodataframe that contains the selected WD ID
+    mapindex is the taxmap geodataframe of the year
+    """
+    gdf = gdf[gdf.wdID==wdID]
+    inter = gpd.overlay(gdf, mapindex[['ORMapNum','geometry']], 
+                    how='intersection', keep_geom_type=False)
+    return inter
+
+def split_taxmap_to_records(df, gdf, trsqq, taxlots):
+    """
+    this function is applied when the same taxmap has multiple records
+    df is the dataframe of the selected WD ID
+    gdf is the geodataframe of the selected taxmaps, inter from split_WD_to_taxmaps
+    trsqq is the selected trsqq that appears in multiple record IDs
+    taxlots are the taxlots of the year
+    """
+    df = df[df.trsqq==trsqq]
+    rdf = reindex_data(df)
+    taxlots = taxlots[taxlots.ORTaxlot.isin(rdf.ORTaxlot.unique())]
+    t_df = rdf[['ORTaxlot','record_ID']].merge(taxlots[['ORTaxlot', 'geometry']], 
+                                                     on='ORTaxlot', 
+                                                     how='left')
+    t_gdf = gpd.GeoDataFrame(t_df, geometry='geometry')
+    t_gdf = t_gdf.dissolve('record_ID')
+    t_gdf['record_ID'] = t_gdf.index
+    i_gdf = gdf[gdf.ORMapNum==df.ORMapNum.unique()[0]]
+    inter = gpd.overlay(i_gdf, t_gdf, how='intersection', keep_geom_type=False)
+    return inter
+    
+def create_ORMapNm(ct_nm, trsqq):
+    """
+    return ORMap number based on county name and trsqq
+    """
+    return str(int(cnt_dict[ct_nm])).zfill(2) + convert_trsqq(trsqq) + '--0000'
+    
 def get_all_wd(num):
+    """
+    combine all original DSL tables into one dataframe
+    """    
     frames = []
     for i in range(num):
         wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i])
@@ -85,6 +180,9 @@ def get_all_wd(num):
     return wd_df
 
 def get_all_SA(num):
+    """
+    combine all the SA polygons into one dataframe
+    """  
     frames = []
     for i in range(num):
         sa_dt = gpd.read_file(outpath + f'\\final\\mapped_wd_Set00{i+1}.shp')
