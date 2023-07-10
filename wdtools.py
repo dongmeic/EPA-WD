@@ -30,6 +30,7 @@ from win32com.client import Dispatch
 from shapely.validation import make_valid
 import warnings
 from shapely.errors import ShapelyDeprecationWarning
+from pyproj import Transformer
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
@@ -49,6 +50,22 @@ cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 OR_counties = list(cnt_dict.keys())
 nm2add = [0, 1420, 2143, 2878]
+selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
+           'city', 'county', 'site_name', 'site_desc','latitude',
+           'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
+           'status_name', 'received_date', 'response_date','reissuance_response_date', 
+           'project_id', 'site_id', 'SetID','record_ID', 'ORMapNum']
+varlist = selectedvars + ['geometry', 'code']
+transformer = Transformer.from_crs("EPSG:2992", "EPSG:4326")
+coldict = {'wetdet_delin_number': 'wdID', 
+           'address_location_desc':'loc_desc', 
+           'DocumentName':'doc_name',
+           'DecisionLink':'doc_link',
+           'is_batch_file':'isbatfile',
+           'status_name': 'status_nm',
+           'received_date':'receiveddt', 
+           'response_date':'responsedt',
+           'reissuance_response_date':'reissuance'}
 
 def read_trsqq():
     """
@@ -74,6 +91,74 @@ with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
 pd.options.mode.chained_assignment = None
 
 ################################################ Deliverable #########################################################
+
+def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, export=False, outnm='example_data'):
+    """
+    split study area polygons where multiple record IDs exist;
+    em_wids is the example WD IDs;
+    wd_df is the dataframe that includes the example WD IDs;
+    sa_gdf_all is the geodataframe that includes the example WD IDs;
+    all_mapIdx is the combined geodataframe of map index from all years;
+    all_taxlot is the combined geodataframe of taxlots from all years;
+    return the combined geodataframe from split_WD_to_records
+    """
+    wd_df_s = wd_df[wd_df.wetdet_delin_number.isin(em_wids)]
+    wd_df_s['ORMapNum'] = wd_df_s[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, 
+                                                                          trsqq=row.trsqq), axis = 1)
+    sa_gdf_s = sa_gdf_all[sa_gdf_all.wdID.isin(em_wids)]
+    wdID_list, n=check_duplicates(wd_df_s.wetdet_delin_number.values)
+    if n>1:
+        frames = []
+        for wid in wdID_list:
+            if wid in sa_gdf_s.wdID.values:
+                #print(wid)
+                ORmn = wd_df_s[wd_df_s.wetdet_delin_number==wid].ORMapNum.values
+                yr = wid[2:6]
+                mapIdx = all_mapIdx[(all_mapIdx.ORMapNum.isin(ORmn)) & (all_mapIdx.year==yr)]
+                taxlot = all_taxlot[all_taxlot.year==yr]
+                out = split_WD_to_records(df=wd_df_s, gdf=sa_gdf_s, wdID=wid, mapindex=mapIdx, taxlots=taxlot)
+                frames.append(out)
+        df = pd.concat(frames, ignore_index=True)
+        gdf1 = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
+        wdID_sdf = wd_df_s[~wd_df_s.wetdet_delin_number.isin(wdID_list)]
+        wdIDList = wdID_sdf.wetdet_delin_number.values
+        sa_sgdf = sa_gdf_s[sa_gdf_s.wdID.isin(wdIDList)]
+        sa_sgdf.rename(columns={'wdID':'wetdet_delin_number'}, inplace=True)
+        gdf2 = wdID_sdf.merge(sa_sgdf[['code', 'wetdet_delin_number', 'geometry']], on='wetdet_delin_number')
+        gdf = pd.concat([gdf1[varlist], gdf2[varlist]])
+    else:
+        sa_gdf_s.rename(columns={'wdID':'wetdet_delin_number'}, inplace=True)
+        gdf = wd_df_s.merge(sa_gdf_s[['code', 'wetdet_delin_number', 'geometry']], on='wetdet_delin_number')
+        gdf = gdf[varlist]
+    gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
+    gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
+    gdf['lat'], gdf['lon'] = transformer.transform(gdf.centroid.x, gdf.centroid.y)
+    if export:
+        gdf = gdf.rename(columns=coldict)
+        gdf['geometry'] = gdf.geometry.buffer(2)
+        gdf.to_file(f'{outpath}\\test\\{outnm}.shp')    
+    return gdf
+           
+def read_all_mapIdx():
+    """
+    combine mapIndex from all years
+    """
+    frames = []
+    for year in range(yearstart, yearend):
+        mapIdx_dt = read_mapIdx(year)
+        mapIdx_dt['year'] = str(year)
+        frames.append(mapIdx_dt[['year', 'ORMapNum', 'geometry']])
+    df = pd.concat(frames, ignore_index=True)
+    gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
+    return gdf
+    
+def read_mapIdx(year):
+    """
+    read mapIndex from one year
+    """
+    mapindex = gpd.read_file(inpath+f'\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years\\Taxlots{year}.gdb', 
+                             layer='MapIndex')
+    return mapindex
 
 def replace_geometry(gdf):
     """
@@ -105,11 +190,6 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots):
     mapindex is the taxmap geodataframe of the year
     taxlots are the taxlots of the year
     """
-    selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
-                    'city', 'county', 'site_name', 'site_desc','latitude',
-                    'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
-                    'status_name', 'received_date', 'response_date','reissuance_response_date', 
-                    'project_id', 'site_id','SetID','record_ID', 'ORMapNum']
     ndf = df[df.wetdet_delin_number==wdID]
     cnts = ndf.county.unique()
     if len(cnts) > 1:
@@ -120,7 +200,7 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots):
         return None
     else:
         setID = ndf.SetID.values[0]
-        print(f"WD {wdID} is in County {cnts[0]} in Set {setID}...")
+        #print(f"WD {wdID} is in County {cnts[0]} in Set {setID}...")
         ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, 
                                                                           trsqq=row.trsqq), 
                                                axis = 1)
@@ -139,12 +219,10 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots):
             ogdf=ngdf[~ngdf.ORMapNum.isin(idf.ORMapNum)][['ORMapNum', 'geometry', 'code']]
             odf=ndf[~ndf.ORMapNum.isin(idf.ORMapNum)][selectedvars]
             odf=ogdf.merge(odf, on='ORMapNum', how='left')
-            selectedvars.extend(['code', 'geometry'])
-            out=pd.concat([idf[selectedvars], odf[selectedvars]])
+            out=pd.concat([idf[varlist], odf[varlist]])
         else:
             out=ndf.merge(ngdf[['ORMapNum', 'geometry', 'code']], on='ORMapNum', how='left')
-            selectedvars.append('code')
-            out=out[selectedvars]
+            out=out[varlist]
         out = gpd.GeoDataFrame(out, geometry='geometry')
         out = out.dissolve('record_ID')
         out['record_ID'] = out.index
@@ -1468,7 +1546,7 @@ def get_record_dict(setID, wd_df):
     record_dict = dict(zip(record_df.county[1:len(counties)], record_df.cum_count[0:(len(counties)-1)]))
     return counties, record_dict
 
-def combine_taxlot(exportID=True):
+def combine_taxlot(exportID=False):
     """
     combine taxlots from all years
     """
