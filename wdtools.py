@@ -36,7 +36,7 @@ warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
 
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
-outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output'
+outpath = inpath + '\\output'
 wdpath = inpath + '\\DSL data originals'
 txpath = inpath + '\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years'
 yearstart = 2016
@@ -92,6 +92,19 @@ pd.options.mode.chained_assignment = None
 
 ################################################ Deliverable #########################################################
 
+def export_wd_gdf_by_record(gdf, outnm):
+    gdf = gdf[varlist]
+    gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
+    gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
+    gdf['lat'], gdf['lon'] = transformer.transform(gdf.centroid.x, gdf.centroid.y)
+    gdf = gdf.rename(columns=coldict)
+    try:
+        gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
+    except RuntimeError:
+        gdf['geometry'] = gdf.geometry.buffer(0)
+    gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
+    return gdf
+        
 def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, export=False, outnm='example_data'):
     """
     split study area polygons where multiple record IDs exist;
@@ -135,7 +148,10 @@ def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
     gdf['lat'], gdf['lon'] = transformer.transform(gdf.centroid.x, gdf.centroid.y)
     if export:
         gdf = gdf.rename(columns=coldict)
-        gdf['geometry'] = gdf.geometry.buffer(2)
+        try:
+            gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
+        except RuntimeError:
+            gdf['geometry'] = gdf.geometry.buffer(0)
         gdf.to_file(f'{outpath}\\test\\{outnm}.shp')    
     return gdf
            
@@ -182,7 +198,7 @@ def replace_geometry(gdf):
     gdf2 = pd.concat([gdf[~gdf.record_ID.isin(selrids)], gdf1], ignore_index=True)
     return gdf2
     
-def split_WD_to_records(df, gdf, wdID, mapindex, taxlots):
+def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
     """
     this function splits the WD SA ploygons to ploygons by records
     df is the dataframe that contains the selected WD ID and wetdet_delin_number in the columns
@@ -192,18 +208,19 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots):
     """
     ndf = df[df.wetdet_delin_number==wdID]
     cnts = ndf.county.unique()
-    if len(cnts) > 1:
+    if (len(cnts) > 1) and (review==False):
         print("WD crosses counties!")
         return None
-    elif cnts not in OR_counties:
+    elif cnts.any() not in OR_counties:
         print(f"Check the county name {cnts[0]}!")
         return None
     else:
         setID = ndf.SetID.values[0]
         #print(f"WD {wdID} is in County {cnts[0]} in Set {setID}...")
-        ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, 
-                                                                          trsqq=row.trsqq), 
-                                               axis = 1)
+        if 'ORMapNum' not in ndf.columns:
+            ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, 
+                                                                              trsqq=row.trsqq), 
+                                                   axis = 1)
         trsqq_list, n = check_duplicates(ndf.trsqq.values)
         ngdf = split_WD_to_taxmaps(gdf=gdf, wdID=wdID, mapindex=mapindex)
         if n > 0:
