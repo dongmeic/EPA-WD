@@ -1397,6 +1397,7 @@ def convert_trsqq(x):
     """
     convert township, range, section, and quarter-quarter to the taxlot id format
     """
+    x = '{:<08s}'.format(x)
     s = re.sub("V|X|Y|Z", "", x)
     xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + get_qq_code(x)
     return xt[:16]
