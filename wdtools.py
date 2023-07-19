@@ -66,6 +66,7 @@ coldict = {'wetdet_delin_number': 'wdID',
            'received_date':'receiveddt', 
            'response_date':'responsedt',
            'reissuance_response_date':'reissuance'}
+issuepath = inpath + '\\GIS\\ArcGIS Pro Project\\DataReview\\issueIDs.gdb'
 
 def read_trsqq():
     """
@@ -105,7 +106,7 @@ def export_wd_gdf_by_record(gdf, outnm):
     gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
     return gdf
         
-def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, export=False, outnm='example_data'):
+def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, export=False, outnm='example_data', review=False):
     """
     split study area polygons where multiple record IDs exist;
     em_wids is the example WD IDs;
@@ -116,11 +117,10 @@ def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
     return the combined geodataframe from split_WD_to_records
     """
     wd_df_s = wd_df[wd_df.wetdet_delin_number.isin(em_wids)]
-    wd_df_s['ORMapNum'] = wd_df_s[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, 
-                                                                          trsqq=row.trsqq), axis = 1)
+    wd_df_s['ORMapNum'] = wd_df_s[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
     sa_gdf_s = sa_gdf_all[sa_gdf_all.wdID.isin(em_wids)]
     wdID_list, n=check_duplicates(wd_df_s.wetdet_delin_number.values)
-    if n>1:
+    if n>0:
         frames = []
         for wid in wdID_list:
             if wid in sa_gdf_s.wdID.values:
@@ -129,7 +129,10 @@ def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
                 yr = wid[2:6]
                 mapIdx = all_mapIdx[(all_mapIdx.ORMapNum.isin(ORmn)) & (all_mapIdx.year==yr)]
                 taxlot = all_taxlot[all_taxlot.year==yr]
-                out = split_WD_to_records(df=wd_df_s, gdf=sa_gdf_s, wdID=wid, mapindex=mapIdx, taxlots=taxlot)
+                if review:
+                    out = split_WD_to_records(df=wd_df_s, gdf=sa_gdf_s, wdID=wid, mapindex=mapIdx, taxlots=taxlot, review=True)
+                else:
+                    out = split_WD_to_records(df=wd_df_s, gdf=sa_gdf_s, wdID=wid, mapindex=mapIdx, taxlots=taxlot)
                 frames.append(out)
         df = pd.concat(frames, ignore_index=True)
         gdf1 = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
@@ -143,6 +146,7 @@ def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
         sa_gdf_s.rename(columns={'wdID':'wetdet_delin_number'}, inplace=True)
         gdf = wd_df_s.merge(sa_gdf_s[['code', 'wetdet_delin_number', 'geometry']], on='wetdet_delin_number')
         gdf = gdf[varlist]
+        gdf = gpd.GeoDataFrame(gdf, crs="EPSG:2992", geometry='geometry')
     gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
     gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
     gdf['lat'], gdf['lon'] = transformer.transform(gdf.centroid.x, gdf.centroid.y)
@@ -209,7 +213,7 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
     ndf = df[df.wetdet_delin_number==wdID]
     cnts = ndf.county.unique()
     if (len(cnts) > 1) and (review==False):
-        print("WD crosses counties!")
+        print(f"WD {wdID} crosses counties!")
         return None
     elif cnts.any() not in OR_counties:
         print(f"Check the county name {cnts[0]}!")
@@ -218,9 +222,7 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
         setID = ndf.SetID.values[0]
         #print(f"WD {wdID} is in County {cnts[0]} in Set {setID}...")
         if 'ORMapNum' not in ndf.columns:
-            ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, 
-                                                                              trsqq=row.trsqq), 
-                                                   axis = 1)
+            ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
         trsqq_list, n = check_duplicates(ndf.trsqq.values)
         ngdf = split_WD_to_taxmaps(gdf=gdf, wdID=wdID, mapindex=mapindex)
         if n > 0:
@@ -253,7 +255,12 @@ def split_WD_to_taxmaps(gdf, wdID, mapindex):
     mapindex is the taxmap geodataframe of the year
     """
     gdf = gdf[gdf.wdID==wdID]
-    inter = gpd.overlay(gdf, mapindex[['ORMapNum','geometry']], 
+    try:
+        inter = gpd.overlay(gdf, mapindex[['ORMapNum','geometry']], 
+                    how='intersection', keep_geom_type=False)
+    except NotImplementedError:
+        gdf['geometry'] = gdf.geometry.buffer(0)
+        inter = gpd.overlay(gdf, mapindex[['ORMapNum','geometry']], 
                     how='intersection', keep_geom_type=False)
     return inter
 
@@ -275,7 +282,11 @@ def split_taxmap_to_records(df, gdf, trsqq, taxlots):
     t_gdf = t_gdf.dissolve('record_ID')
     t_gdf['record_ID'] = t_gdf.index
     i_gdf = gdf[gdf.ORMapNum==df.ORMapNum.unique()[0]]
-    inter = gpd.overlay(i_gdf, t_gdf, how='intersection', keep_geom_type=False)
+    i_gdf = i_gdf.dissolve('wdID')
+    i_gdf['wdID'] = i_gdf.index
+    i_gdf.reset_index(drop=True, inplace=True)
+    inter = gpd.overlay(i_gdf, t_gdf, how='intersection', 
+                        keep_geom_type=False)
     return inter
     
 def create_ORMapNm(ct_nm, trsqq):
@@ -526,11 +537,14 @@ def rename_wdID(x):
         x = x.replace('_', '-')
     return x
 
-def revise_single_partial_file(setID, wID):
+def revise_single_partial_file(setID, wID, from_set=True):
     """
     Revise the geometry of a single partial taxlot
     """
-    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    if from_set:
+        revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    else:
+        revpath = issuepath   
     gdf = gpd.read_file(revpath, layer=wID)
     gdf = gdf.to_crs(epsg=2992)
     selcols = ['Shape_Length', 'Shape_Area']
@@ -543,13 +557,18 @@ def revise_single_partial_file(setID, wID):
     df.loc[:,'geometry'] = gdf.loc[:,'geometry']
     return df
 
-def merge_single_partial_file(setID, wIDlist):
+def merge_single_partial_file(setID, wIDlist, from_set=True):
     """
     Merge the revised partial taxlots into a single GeoDataFrame
     """
     df = pd.DataFrame()
-    for wID in wIDlist:
-        df=pd.concat([df, revise_single_partial_file(setID, wID)], ignore_index=True)
+    if from_set:
+        for wID in wIDlist:
+            df=pd.concat([df, revise_single_partial_file(setID, wID)], ignore_index=True)
+    else:
+        for wID in wIDlist:
+            df=pd.concat([df, revise_single_partial_file(setID=False, wID=wID, from_set=False)], ignore_index=True)
+            
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
 
@@ -1414,6 +1433,7 @@ def reindex_data(wd_dt):
     """
     reindex the data based on the number of lots in each parcel id
     wd_dt is from read_wd_table or reorganize_tocheck
+    make sure the records are with lot numbers
     return reindexed data
     """
     # get a list of lot numbers in each parcel id record
