@@ -93,6 +93,17 @@ pd.options.mode.chained_assignment = None
 
 ################################################ Deliverable #########################################################
 
+def get_corrected_wd_df(num):
+    """
+    combine all the corrected DSL tables into one dataframe
+    """  
+    frames = []
+    for i in range(num):
+        wd_dt = pd.read_csv(wdpath+f'\\Corrected_by_Set\\Set{i+1}_2017-20220601.csv')
+        frames.append(wd_dt)
+    wd_df = pd.concat(frames, ignore_index=True)
+    return wd_df
+
 def export_wd_gdf_by_record(gdf, outnm):
     gdf = gdf[varlist]
     gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
@@ -106,9 +117,10 @@ def export_wd_gdf_by_record(gdf, outnm):
     gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
     return gdf
         
-def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, export=False, outnm='example_data', review=False):
+def split_SA_by_rid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, export=False, outnm='example_data', review=False):
     """
     split study area polygons where multiple record IDs exist;
+    rid is record ID;
     em_wids is the example WD IDs;
     wd_df is the dataframe that includes the example WD IDs;
     sa_gdf_all is the geodataframe that includes the example WD IDs;
@@ -147,8 +159,8 @@ def split_SA_by_wid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
         gdf = wd_df_s.merge(sa_gdf_s[['code', 'wetdet_delin_number', 'geometry']], on='wetdet_delin_number')
         gdf = gdf[varlist]
         gdf = gpd.GeoDataFrame(gdf, crs="EPSG:2992", geometry='geometry')
-    gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
-    gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
+    #gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
+    #gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
     gdf['lat'], gdf['lon'] = transformer.transform(gdf.centroid.x, gdf.centroid.y)
     if export:
         gdf = gdf.rename(columns=coldict)
@@ -297,7 +309,7 @@ def create_ORMapNm(ct_nm, trsqq):
     
 def get_all_wd(num):
     """
-    combine all original DSL tables into one dataframe
+    combine all the original DSL tables into one dataframe
     """    
     frames = []
     for i in range(num):
