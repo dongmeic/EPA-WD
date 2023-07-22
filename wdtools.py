@@ -93,15 +93,35 @@ pd.options.mode.chained_assignment = None
 
 ################################################ Deliverable #########################################################
 
-def get_corrected_wd_df(num):
+def format_gdf_provided(gdf, wdID):
+    """
+    format gdf provided to be in the same format with mapped records
+    """      
+    gdf['wdID'] = wdID
+    gdf = gdf.dissolve('wdID')
+    gdf['wdID'] = gdf.index
+    gdf.reset_index(drop=True, inplace=True)
+    gdf['code'] = 3
+    gdf = gdf.to_crs(epsg=2992)
+    if 'Shape_Length' not in gdf.columns:
+        gdf['Shape_Length'] = gdf.length
+    if 'Shape_Area' not in gdf.columns:
+        gdf['Shape_Area'] = gdf.area
+    gdf = gdf[['wdID', 'code', 'Shape_Length', 'Shape_Area', 'geometry']]
+    return gdf
+
+def get_corrected_wd_df(num, setID=False):
     """
     combine all the corrected DSL tables into one dataframe
     """  
     frames = []
-    for i in range(num):
-        wd_dt = pd.read_csv(wdpath+f'\\Corrected_by_Set\\Set{i+1}_2017-20220601.csv')
-        frames.append(wd_dt)
-    wd_df = pd.concat(frames, ignore_index=True)
+    if setID:
+        wd_df = pd.read_csv(wdpath+f'\\Corrected_by_Set\\Set{num}_2017-20220601.csv')
+    else:
+        for i in range(num):
+            wd_dt = pd.read_csv(wdpath+f'\\Corrected_by_Set\\Set{i+1}_2017-20220601.csv')
+            frames.append(wd_dt)
+        wd_df = pd.concat(frames, ignore_index=True)
     return wd_df
 
 def export_wd_gdf_by_record(gdf, outnm):
