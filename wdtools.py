@@ -105,6 +105,9 @@ def get_corrected_wd_df(num):
     return wd_df
 
 def export_wd_gdf_by_record(gdf, outnm):
+    """
+    export geodataframe with the original wd data
+    """      
     gdf = gdf[varlist]
     gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
     gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
@@ -225,14 +228,14 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
     ndf = df[df.wetdet_delin_number==wdID]
     cnts = ndf.county.unique()
     if (len(cnts) > 1) and (review==False):
-        print(f"WD {wdID} crosses counties!")
+        print(f"{wdID} crosses counties!")
         return None
     elif cnts.any() not in OR_counties:
         print(f"Check the county name {cnts[0]}!")
         return None
     else:
         setID = ndf.SetID.values[0]
-        #print(f"WD {wdID} is in County {cnts[0]} in Set {setID}...")
+        #print(f"{wdID} is in County {cnts[0]} in Set {setID}...")
         if 'ORMapNum' not in ndf.columns:
             ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
         trsqq_list, n = check_duplicates(ndf.trsqq.values)
