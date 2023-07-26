@@ -81,8 +81,9 @@ def read_trsqq():
 
 trsqq, trsqq_dict, ttdf = read_trsqq()
 tid_dst = [tid for tid in ttdf.ORTaxlot.unique() if any(substring in tid for substring in ['--D', '--S', '--T'])]
+tid_dst_0 = list(map(lambda x: re.split("--", x)[0], tid_dst))
+tid_dst_1 = list(map(lambda x: re.split("--", x)[1], tid_dst))
 tsq_dst = ttdf[ttdf.ORTaxlot.isin(tid_dst)].trsqq.unique()
-
 cnts = gpd.read_file(inpath + "\\GIS\\Oregon_Counties.shp")
 
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
@@ -1461,7 +1462,12 @@ def create_ORTaxlot(cnt_code, trsqq, lot):
     create the taxlot id based on the county code, township, range, section, and lot number
     """
     #print(cnt_code)
-    taxlotID = str(int(cnt_code)).zfill(2) + convert_trsqq(trsqq) + '--' + ('000000000' + lot)[-9:]
+    part1 = str(int(cnt_code)).zfill(2) + convert_trsqq(trsqq) 
+    taxlotID = part1 + '--' + ('000000000' + lot)[-9:]
+    tid_dst_2 = [x[-len(lot):] for x in tid_dst_1]    
+    if (taxlotID not in all_txid):
+        if (part1 in tid_dst_0) and (lot in tid_dst_2):
+            taxlotID = [tid for tid in tid_dst if (re.search(part1, tid)) and (re.search(lot, tid))][0]
     return taxlotID
 
 def reindex_data(wd_dt):
@@ -1555,7 +1561,7 @@ def combine_wd_tables(setID, nm_to_add):
     Combine all the wd tables in the set to review unique records, record_ID is used for combined tables
     use this function when reindex is not neccessary
     nm_to_add is the number of previous records (records from the previous sets; same to all functions with this variable)
-    """
+    """     
     files = list_files(os.path.join(wdpath, setID))
     # in case there are unidentified files
     files = [file for file in files if '~$' not in file]
@@ -1641,9 +1647,8 @@ def update_recordID(df, wd_df, setID, nm_to_add):
     input 1) wd_df is the output from combine_wd_tables (read all files in the same set without merging with taxlots); 
           2) df is the reindexed wd data, from combined_reindexed_data
     """
-    counties = get_record_dict(setID, wd_df)[0]
+    counties, record_dict = get_record_dict(setID, wd_df)
     selected_cnty = df.county.isin(counties[1:])
-    record_dict = get_record_dict(setID, wd_df)[1]
     df = df.copy()
     df.loc[selected_cnty, 'record_ID'] = df.loc[selected_cnty, 'recordID'] + df[selected_cnty].county.map(record_dict) + nm_to_add
     df.loc[df.county == counties[0], 'record_ID'] = df.loc[df.county == counties[0], 'recordID'] + nm_to_add
@@ -2017,7 +2022,7 @@ def run_Tier1(setID, nm_to_add, all_taxlot):
     initial match
     """
     wd = combine_wd_tables(setID, nm_to_add)
-    setdf = combined_reindexed_data(setID, nm_to_add)
+    setdf = reindex_data(wd)
     # this might take a while
     start = time.time()
     # export = False

@@ -54,3 +54,4 @@ DSL requested data attritutes and test data for their database development tests
 
 ### Study area polygons
 
+Certain issues need to be considered:
