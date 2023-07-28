@@ -36,6 +36,8 @@ Detailed steps:
 
 ### Tier 3 & 4 - digitize the partial and unmatched records
 
+Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb`
+
 ### Report
 1. Combine digitized and matched records, including WD ID;
 2. Review unmatched or issue IDs;
