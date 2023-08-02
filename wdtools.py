@@ -653,6 +653,11 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     unmatchedIDs = [wdID for wdID in wd.wetdet_delin_number.unique() if wdID not in final_gdf.wdID.unique()]
     toCheck = [ID for ID in unmatchedIDs if ID not in issueIDs]
     digitized_nIDs = len(editedIDs) + len(dat.wdID.unique()) + len(wo_lot.wdID.unique())
+    file = outpath+f"\\matched\\{setID}_edited_1.txt"
+    if os.path.exists(file):
+        with open(file) as f:
+            editedIDs1 = f.readlines()
+        final_gdf.loc[final_gdf.wdID.isin(editedIDs1), 'code'] = 1
     if export:
         final_gdf.to_file(os.path.join(inpath, "output", "final", f"mapped_wd_{setID}.shp"), index=False)
     return final_gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
