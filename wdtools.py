@@ -59,6 +59,7 @@ varlist = selectedvars + ['geometry', 'code']
 transformer = Transformer.from_crs("EPSG:2992", "EPSG:4326")
 coldict = {'wetdet_delin_number': 'wdID', 
            'address_location_desc':'loc_desc', 
+           'Coord-Source':'CordSource',
            'DocumentName':'doc_name',
            'DecisionLink':'doc_link',
            'is_batch_file':'isbatfile',
@@ -192,7 +193,7 @@ def split_SA_by_rid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
             gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
         except RuntimeError:
             gdf['geometry'] = gdf.geometry.buffer(0)
-        gdf.to_file(f'{outpath}\\test\\{outnm}.shp')    
+            gdf.to_file(f'{outpath}\\test\\{outnm}.shp')    
     return gdf
            
 def read_all_mapIdx():
@@ -373,7 +374,7 @@ def get_all_SA(num, allsa=True):
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
     return sa_gdf
 
-def join_WD_with_SA_by_taxmap(df, gdf, mapindex):
+def join_WD_with_SA_by_taxmap(df, gdf, mapindex, export=True):
     """
     df is the corrected WD dataframe from get_all_wd
     gdf is the SA polygons from get_all_SA
@@ -383,6 +384,7 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex):
     wdlist = gdf.wdID.unique()
     df['ORMapNum'] = df[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
     for wid in wdlist:
+        #print(wid)
         df_s = df[df.wetdet_delin_number==wid]
         gdf_s = gdf[gdf.wdID==wid]
         ORmn = df_s[df_s.wetdet_delin_number==wid].ORMapNum.values
@@ -393,7 +395,7 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex):
         ndf = df.drop_duplicates(subset='ORMapNum')
         ndf.drop(columns=['parcel_id','site_id','record_ID'], inplace=True)
         g = df.groupby('ORMapNum')
-        pi_df = g.apply(lambda x: '; '.join(x.parcel_id.unique())).to_frame(name='parcel_id').reset_index(drop=True)
+        pi_df = g.apply(lambda x: '; '.join(x.parcel_id.astype(str).unique())).to_frame(name='parcel_id').reset_index(drop=True)
         si_df = g.apply(lambda x: '; '.join(x.site_id.astype(str).unique())).to_frame(name='site_id').reset_index(drop=True)
         ri_df = g.apply(lambda x: '; '.join(x.record_ID.astype(str).unique())).to_frame(name='record_ID').reset_index()
         sdf = pd.concat([ri_df, pi_df, si_df], axis=1)
@@ -402,6 +404,13 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex):
         frames.append(exp_gdf)
     sa_df = pd.concat(frames, ignore_index=True)
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
+    if export:
+        sa_gdf=sa_gdf.rename(columns=coldict)
+        try:
+            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"wd_mapped_data.shp"), index=False)
+        except RuntimeError:
+            sa_gdf['geometry'] = sa_gdf.geometry.buffer(0)
+            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"wd_mapped_data.shp"), index=False)
     return sa_gdf
  
 ################################################ Report #########################################################
