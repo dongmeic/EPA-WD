@@ -49,7 +49,7 @@ cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 OR_counties = list(cnt_dict.keys())
-nm2add = [0, 1420, 2143, 2878]
+nm2add = [0, 1420, 2143, 2878, 3932]
 selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
            'city', 'county', 'site_name', 'site_desc','latitude',
            'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
@@ -185,7 +185,7 @@ def split_SA_by_rid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
         gdf = gpd.GeoDataFrame(gdf, crs="EPSG:2992", geometry='geometry')
     #gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
     #gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
-    gdf['lat'], gdf['lon'] = transformer.transform(gdf.centroid.x, gdf.centroid.y)
+    gdf['lat'], gdf['lon'] = transformer.transform(gdf.representative_point().x, gdf.representative_point().y)
     if export:
         gdf = gdf.rename(columns=coldict)
         try:
@@ -260,7 +260,7 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
         if 'ORMapNum' not in ndf.columns:
             ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
         trsqq_list, n = check_duplicates(ndf.trsqq.values)
-        ngdf = split_WD_to_taxmaps(gdf=gdf, wdID=wdID, mapindex=mapindex)
+        ngdf = split_WD_to_taxmaps(df=ndf, gdf=gdf, wdID=wdID, mapindex=mapindex)
         if n > 0:
             frames = []
             for trsqq in trsqq_list:
@@ -284,20 +284,25 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
         out.reset_index(drop=True, inplace=True)
         return out
 
-def split_WD_to_taxmaps(gdf, wdID, mapindex):
+def split_WD_to_taxmaps(df, gdf, wdID, mapindex):
     """
     this function splits the WD SA ploygons by taxmap
     gdf is the geodataframe that contains the selected WD ID
     mapindex is the taxmap geodataframe of the year
     """
+    selmid = df[df.wetdet_delin_number==wdID].ORMapNum.unique()
     gdf = gdf[gdf.wdID==wdID]
+    selmapindex = mapindex[['ORMapNum','geometry']][mapindex.ORMapNum.isin(selmid)]
     try:
-        inter = gpd.overlay(gdf, mapindex[['ORMapNum','geometry']], 
+        inter = gpd.overlay(gdf, selmapindex, 
                     how='intersection', keep_geom_type=False)
     except NotImplementedError:
         gdf['geometry'] = gdf.geometry.buffer(0)
-        inter = gpd.overlay(gdf, mapindex[['ORMapNum','geometry']], 
+        inter = gpd.overlay(gdf, selmapindex, 
                     how='intersection', keep_geom_type=False)
+    inter = inter.dissolve('ORMapNum')
+    inter['ORMapNum'] = inter.index
+    inter.reset_index(drop=True, inplace=True)
     return inter
 
 def split_taxmap_to_records(df, gdf, trsqq, taxlots):
@@ -331,31 +336,74 @@ def create_ORMapNm(ct_nm, trsqq):
     """
     return str(int(cnt_dict[ct_nm])).zfill(2) + convert_trsqq(trsqq) + '--0000'
     
-def get_all_wd(num):
+def get_all_wd(num, raw=False):
     """
     combine all the original DSL tables into one dataframe
     """    
     frames = []
     for i in range(num):
-        wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i])
+        if raw:
+            wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i], raw=True)
+        else:
+            wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i], raw=False)
         wd_dt['SetID'] = i+1
         frames.append(wd_dt)
     wd_df = pd.concat(frames, ignore_index=True)
     return wd_df
 
-def get_all_SA(num):
+def get_all_SA(num, allsa=True):
     """
     combine all the SA polygons into one dataframe
+    allsa is to check all SA polygons after reviewing issue IDs
     """  
     frames = []
     for i in range(num):
-        sa_dt = gpd.read_file(outpath + f'\\final\\mapped_wd_Set00{i+1}.shp')
+        file1 = outpath + f'\\final\\mapped_wd_Set00{i+1}.shp'
+        file2 = outpath + f'\\final\\Set00{i+1}_mapped_wd.shp'
+        if allsa:
+            if os.path.exists(file2):
+                sa_dt = gpd.read_file(file2)
+            else:
+                sa_dt = gpd.read_file(file1)
+        else:
+            sa_dt = gpd.read_file(file1)
         sa_dt['SetID'] = i+1
         frames.append(sa_dt)
     sa_df = pd.concat(frames, ignore_index=True)
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
     return sa_gdf
 
+def join_WD_with_SA_by_taxmap(df, gdf, mapindex):
+    """
+    df is the corrected WD dataframe from get_all_wd
+    gdf is the SA polygons from get_all_SA
+    mapindex is the combined taxmaps from read_all_mapIdx
+    """
+    frames = []
+    wdlist = gdf.wdID.unique()
+    df['ORMapNum'] = df[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
+    for wid in wdlist:
+        df_s = df[df.wetdet_delin_number==wid]
+        gdf_s = gdf[gdf.wdID==wid]
+        ORmn = df_s[df_s.wetdet_delin_number==wid].ORMapNum.values
+        yr = wid[2:6]
+        mapIdx = mapindex[(mapindex.ORMapNum.isin(ORmn)) & (mapindex.year==yr)]
+        exp_gdf = split_WD_to_taxmaps(df=df_s, gdf=gdf_s, wdID=wid, mapindex=mapIdx)
+        exp_gdf['lat'], exp_gdf['lon'] = transformer.transform(exp_gdf.representative_point().x, exp_gdf.representative_point().y)
+        ndf = df.drop_duplicates(subset='ORMapNum')
+        ndf.drop(columns=['parcel_id','site_id','record_ID'], inplace=True)
+        g = df.groupby('ORMapNum')
+        pi_df = g.apply(lambda x: '; '.join(x.parcel_id.unique())).to_frame(name='parcel_id').reset_index(drop=True)
+        si_df = g.apply(lambda x: '; '.join(x.site_id.astype(str).unique())).to_frame(name='site_id').reset_index(drop=True)
+        ri_df = g.apply(lambda x: '; '.join(x.record_ID.astype(str).unique())).to_frame(name='record_ID').reset_index()
+        sdf = pd.concat([ri_df, pi_df, si_df], axis=1)
+        fdf = ndf.merge(sdf, on='ORMapNum')
+        exp_gdf = fdf.merge(exp_gdf[['code','ORMapNum','lat','lon','geometry']], on='ORMapNum')
+        frames.append(exp_gdf)
+    sa_df = pd.concat(frames, ignore_index=True)
+    sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
+    return sa_gdf
+ 
 ################################################ Report #########################################################
 
 def flatten(l):
@@ -1561,29 +1609,36 @@ def without_lots(text):
         res = 'Y'
     return res
 
-def combine_wd_tables(setID, nm_to_add):
+def combine_wd_tables(setID, nm_to_add, raw=True):
     """
     Combine all the wd tables in the set to review unique records, record_ID is used for combined tables
     use this function when reindex is not neccessary
     nm_to_add is the number of previous records (records from the previous sets; same to all functions with this variable)
-    """     
-    files = list_files(os.path.join(wdpath, setID))
-    # in case there are unidentified files
-    files = [file for file in files if '~$' not in file]
-    frames = []
-    for file in files:
-        datafile = os.path.join(wdpath, setID, file)
-        xl = pd.ExcelFile(datafile)
-        wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
-        frames.append(wd_dt)
-    wd_df = pd.concat(frames, ignore_index=True)
+    """  
+    if raw:
+        frames = []
+        files = list_files(os.path.join(wdpath, setID))
+        # in case there are unidentified files
+        files = [file for file in files if '~$' not in file]
+        for file in files:
+            datafile = os.path.join(wdpath, setID, file)
+            xl = pd.ExcelFile(datafile)
+            wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
+            frames.append(wd_dt)
+        wd_df = pd.concat(frames, ignore_index=True)
+    else:
+        wd_df = pd.read_csv(wdpath+f'\\Corrected_by_Set\\{setID}.csv')
+  
     # this creates unique IDs for all the records in the same set
     wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1) 
     wd_df.loc[:, 'record_ID'] = wd_df.copy().loc[:, 'record_ID'] + nm_to_add
     selectedID = wd_df.parcel_id.astype(str) != 'nan'
     wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
     # get year from the receive date
-    wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: x.year)
+    if raw:
+        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: x.year)
+    else:
+        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: int(x.split('-')[0]))
     # get year from the wd ID 
     wd_df.loc[:, 'IDyear'] = wd_df.wetdet_delin_number.apply(lambda x: x[2:6]) 
     selectedID = wd_df.parcel_id.astype(str) != 'nan'

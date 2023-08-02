@@ -46,7 +46,7 @@ Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb
 
 ## Notes
 
-The scripts are organized to run by set. A set is collected when DSL sends data at certain time following their master schedule. 
+The scripts are organized to run by set. A set is collected when DSL sends data at certain time following their master schedule. The WD project "WD2019-0259" is from the non-participating counties. GIS files for the WD projects "WD2017-0229" and "WD2021-0179" are provided.
 
 ## WD SA data description
 
