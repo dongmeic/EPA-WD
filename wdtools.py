@@ -49,7 +49,7 @@ cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 OR_counties = list(cnt_dict.keys())
-nm2add = [0, 1420, 2143, 2878, 3932]
+nm2add = [0, 1420, 2143, 2878, 3932, 4370]
 selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
            'city', 'county', 'site_name', 'site_desc','latitude',
            'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
@@ -352,7 +352,7 @@ def get_all_wd(num, raw=False):
     wd_df = pd.concat(frames, ignore_index=True)
     return wd_df
 
-def get_all_SA(num, allsa=True):
+def get_all_SA(num):
     """
     combine all the SA polygons into one dataframe
     allsa is to check all SA polygons after reviewing issue IDs
@@ -361,20 +361,26 @@ def get_all_SA(num, allsa=True):
     for i in range(num):
         file1 = outpath + f'\\final\\mapped_wd_Set00{i+1}.shp'
         file2 = outpath + f'\\final\\Set00{i+1}_mapped_wd.shp'
-        if allsa:
-            if os.path.exists(file2):
-                sa_dt = gpd.read_file(file2)
-            else:
-                sa_dt = gpd.read_file(file1)
+        if os.path.exists(file2):
+            sa_dt = gpd.read_file(file2)
         else:
             sa_dt = gpd.read_file(file1)
         sa_dt['SetID'] = i+1
         frames.append(sa_dt)
     sa_df = pd.concat(frames, ignore_index=True)
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
+    path = inpath + "\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb"
+    WD2021_0179 = gpd.read_file(path, layer="WD2021_0179")
+    WD2021_0179 = WD2021_0179.to_crs(epsg=2992)
+    WD2017_0229 = gpd.read_file(path, layer="WD2017_0229")
+    WD2017_0229 = WD2017_0229.to_crs(epsg=2992)
+    added = pd.concat([WD2021_0179, WD2017_0229], ignore_index=True)
+    sa_gdf = pd.concat([sa_gdf[['wdID', 'code', 'geometry']], 
+                   added[['wdID', 'code', 'geometry']]], 
+                   ignore_index=True)
     return sa_gdf
 
-def join_WD_with_SA_by_taxmap(df, gdf, mapindex, export=True):
+def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=True):
     """
     df is the corrected WD dataframe from get_all_wd
     gdf is the SA polygons from get_all_SA
@@ -387,14 +393,14 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex, export=True):
         #print(wid)
         df_s = df[df.wetdet_delin_number==wid]
         gdf_s = gdf[gdf.wdID==wid]
-        ORmn = df_s[df_s.wetdet_delin_number==wid].ORMapNum.values
+        ORmn = df_s.ORMapNum.values
         yr = wid[2:6]
         mapIdx = mapindex[(mapindex.ORMapNum.isin(ORmn)) & (mapindex.year==yr)]
         exp_gdf = split_WD_to_taxmaps(df=df_s, gdf=gdf_s, wdID=wid, mapindex=mapIdx)
         exp_gdf['lat'], exp_gdf['lon'] = transformer.transform(exp_gdf.representative_point().x, exp_gdf.representative_point().y)
-        ndf = df.drop_duplicates(subset='ORMapNum')
+        ndf = df_s.drop_duplicates(subset='ORMapNum')
         ndf.drop(columns=['parcel_id','site_id','record_ID'], inplace=True)
-        g = df.groupby('ORMapNum')
+        g = df_s.groupby('ORMapNum')
         pi_df = g.apply(lambda x: '; '.join(x.parcel_id.astype(str).unique())).to_frame(name='parcel_id').reset_index(drop=True)
         si_df = g.apply(lambda x: '; '.join(x.site_id.astype(str).unique())).to_frame(name='site_id').reset_index(drop=True)
         ri_df = g.apply(lambda x: '; '.join(x.record_ID.astype(str).unique())).to_frame(name='record_ID').reset_index()
@@ -407,10 +413,10 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex, export=True):
     if export:
         sa_gdf=sa_gdf.rename(columns=coldict)
         try:
-            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"wd_mapped_data.shp"), index=False)
+            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
         except RuntimeError:
             sa_gdf['geometry'] = sa_gdf.geometry.buffer(0)
-            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"wd_mapped_data.shp"), index=False)
+            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
     return sa_gdf
  
 ################################################ Report #########################################################
@@ -1129,7 +1135,7 @@ def adjust_cor(x):
     """
     adjust the correction from single digit to double digit
     """
-    if x.isdigit():
+    if str(x).isdigit():
         return str(x).zfill(2)
     else:
         return x
@@ -1172,13 +1178,12 @@ def correct_unmatched(df, setID, s, ml, export=True):
                         for cor_type in cor_types:
                             sel3 = sel2 & (notes.cor_type==cor_type)
                             repval = notes.loc[sel3, 'to'].values[0]
-                            if cor_type != 'trsqq':
-                                ind = trsqq_cor_dict[cor_type]
-                                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x, index=ind, replacement=repval))
-                            else:
-                                valrep = notes.loc[sel3, 'from'].values[0]
+                            valrep = notes.loc[sel3, 'from'].values[0]
+                            if ('.5' in str(valrep)) or (cor_type == 'trsqq'):
                                 df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(valrep, repval))
-                                
+                            else:
+                                ind = trsqq_cor_dict[cor_type]
+                                df.loc[sel, field] = df.loc[sel, field].apply(lambda x: replace_str_index(x, index=ind, replacement=repval))          
                     else:
                         valrep = notes.loc[sel2, 'from'].values[0]
                         repval = notes.loc[sel2, 'to'].values[0]
@@ -1481,6 +1486,9 @@ def get_s_code(x):
     return s       
 
 def get_qq_code(x):
+    """
+    get QQ code from trsqq code
+    """
     nms = re.findall('\d+', x)
     lts = re.findall("[a-zA-Z]+", x)
     if len(nms[2]) > 2:
@@ -1514,6 +1522,7 @@ def convert_trsqq(x):
     """
     convert township, range, section, and quarter-quarter to the taxlot id format
     """
+    #print(x)
     x = '{:<08s}'.format(x)
     s = re.sub("V|X|Y|Z", "", x)
     xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + get_qq_code(x)
@@ -1529,7 +1538,13 @@ def create_ORTaxlot(cnt_code, trsqq, lot):
     tid_dst_2 = [x[-len(lot):] for x in tid_dst_1]    
     if (taxlotID not in all_txid):
         if (part1 in tid_dst_0) and (lot in tid_dst_2):
-            taxlotID = [tid for tid in tid_dst if (re.search(part1, tid)) and (re.search(lot, tid))][0]
+            txl_ID_lst = [tid for tid in tid_dst if (re.search(part1, tid)) and (re.search(lot, tid))]
+            if len(txl_ID_lst) > 0:
+                taxlotID = txl_ID_lst[0]
+            else:
+                ntaxlotID = taxlotID[:6]+taxlotID[7:12]+taxlotID[13:18]+'00--'+taxlotID.split('--')[1]
+                if ntaxlotID in all_txid:
+                    taxlotID = ntaxlotID         
     return taxlotID
 
 def reindex_data(wd_dt):
@@ -2023,6 +2038,8 @@ def taxlot2trsqq(x):
                 res = p3 + x1[1][1:4]
             else:
                 res = p3 + x1[1][1:5]
+    elif any([s in x for s in ['.0S', '.0W', '.0E', '.0N']]):
+        res = x[2:4] + x[6:9] + x[11:16]
                 
     else:
         p4 = x[2:4] + x[7:10] + x[13]
