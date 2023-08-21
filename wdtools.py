@@ -1326,6 +1326,7 @@ def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
     matched_toReview = matched[matched.notes.notnull()] 
     wd_toReview = wd[wd.wetdet_delin_number.isin(matched_toReview.wdID.unique())]
     wd_toReview.to_csv(outpath + f'\\to_review\\partial_matched_{setID}.csv', index=False)
+    unmatched_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_2.csv'), index=False)
     return matched, unmatched_df
 
 def report2DSL(setID):
@@ -1452,6 +1453,8 @@ def get_tr_code(x, code='t'):
     
     if len(nm1) == 1:
         tr1 = '0' + nm1
+    elif len(nm1) == 3:
+        tr1 = nm1[1:3]
     else:
         tr1 = nm1
     
