@@ -39,10 +39,10 @@ Detailed steps:
 Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb`
 
 ### Report
-1. Combine digitized and matched records, including WD ID;
+1. Run `run_Tier3_4_final`(`04_combine_matched_digitized.ipynb`) to combine digitized and matched records, including WD ID;
 2. Review unmatched or issue IDs;
 3. Get the deliverables including the matched or digitized WD records;
-4. Report the issues for final digitizing work in needed.
+4. Report the issues for the final digitizing work needed.
 
 ## Notes
 
@@ -56,4 +56,4 @@ DSL requested data attritutes and test data for their database development tests
 
 ### Study area polygons
 
-Certain issues need to be considered:
+Run `join_WD_with_SA_by_taxmap` in `10_review_data_from_all_sets` to get the deliverable.

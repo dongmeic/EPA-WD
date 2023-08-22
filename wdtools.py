@@ -90,7 +90,8 @@ cnts = gpd.read_file(inpath + "\\GIS\\Oregon_Counties.shp")
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
 with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
         all_txid = pickle.load(f)
-
+with open(os.path.join(inpath, "ORMapIndex.pkl"), "rb") as f:
+        all_mpidx = pickle.load(f)
 pd.options.mode.chained_assignment = None
 
 ################################################ Deliverable #########################################################
@@ -196,7 +197,7 @@ def split_SA_by_rid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, ex
             gdf.to_file(f'{outpath}\\test\\{outnm}.shp')    
     return gdf
            
-def read_all_mapIdx():
+def read_all_mapIdx(exportID=False):
     """
     combine mapIndex from all years
     """
@@ -207,6 +208,9 @@ def read_all_mapIdx():
         frames.append(mapIdx_dt[['year', 'ORMapNum', 'geometry']])
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
+    if exportID:
+        with open(os.path.join(inpath, "ORMapIndex.pkl"), "wb") as f:
+            pickle.dump(list(gdf.ORMapNum.unique()), f) 
     return gdf
     
 def read_mapIdx(year):
@@ -335,7 +339,14 @@ def create_ORMapNm(ct_nm, trsqq):
     """
     return ORMap number based on county name and trsqq
     """
-    return str(int(cnt_dict[ct_nm])).zfill(2) + convert_trsqq(trsqq) + '--0000'
+    part1 = str(int(cnt_dict[ct_nm])).zfill(2) + convert_trsqq(trsqq)
+    mpidx = part1 + '--0000'
+    if mpidx not in all_mpidx:
+        if part1 in tid_dst_0:
+            for mid in [part1+f'--{x}000' for x in ['D', 'S', 'T']]:
+                if mid in all_mpidx:
+                    mpidx = mid     
+    return mpidx
     
 def get_all_wd(num, raw=False):
     """
@@ -738,6 +749,11 @@ def run_Tier3_4_final(setID, nm_to_add):
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     with open(outpath+f'\\matched\\{setID}_edited.txt') as f:
         edited = f.readlines()
+    file = outpath+f"\\matched\\{setID}_edited_1.txt"
+    if os.path.exists(file):
+        with open(file) as f:
+            editedIDs1 = f.readlines()
+    edited = edited + editedIDs1
     gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs = combine_matched_digitized(setID=setID, 
                                                                                      editedIDs=edited[0].split(", "), 
                                                                                      nm_to_add=nm_to_add)
