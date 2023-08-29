@@ -648,7 +648,7 @@ def writelist(lst, lstnm, setID):
     """
     with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
             pickle.dump(lst, f)
-
+    
 def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False, wd_id=None, wddf=None):
     """
     loop through the unmatched records and check the original records
@@ -875,6 +875,12 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
         with open(file) as f:
             reviewedIDs = f.readlines()
         issueIDs = [iID for iID in issueIDs if iID not in reviewedIDs]
+    file = outpath+f"\\matched\\{setID}_not_mapped.txt"
+    if os.path.exists(file):
+        with open(file) as f:
+            withdrawnIDs = f.readlines()
+            data2 = data2[~data2.wdID.isin(withdrawnIDs)]
+        issueIDs = issueIDs + withdrawnIDs
     matched_gdf = matched[~matched.wdID.isin(excluded+issueIDs)]
     matched_gdf['code'] = 0
     # merge matched and digitized/edited
