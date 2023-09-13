@@ -36,21 +36,20 @@ from utils import read_geo_data, remove_duplicates
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 
-
-TAXLOT_PATH = inpath + '\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years'
+INPATH = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
+TAXLOT_PATH = f'{INPATH}\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years'
 
 # Clean up for now; will deal with placement later...
 google_key = json.load(open('config/keys.json'))['google_maps']['APIKEY']
-inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
-outpath = inpath + '\\output'
-wdpath = inpath + '\\DSL data originals'
+outpath = f'{INPATH}\\output'
+wdpath = f'{INPATH}\\DSL data originals'
 yearstart = 2016
 yearend = 2023
 #outfolder = 'test'
 outfolder = 'output\\matched'
 # create a spreadsheet to create a dictionary for the match between county name
 # and code
-cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
+cnt_ID = pd.read_excel(f'{INPATH}\\notes\\CNT_Code.xlsx')
 # create a dictionary to look up county code
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(
@@ -79,16 +78,16 @@ coldict = {
     'received_date':'receiveddt', 
     'response_date':'responsedt',
     'reissuance_response_date':'reissuance'}
-issuepath = inpath + '\\GIS\\ArcGIS Pro Project\\DataReview\\issueIDs.gdb'
+issuepath = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\issueIDs.gdb'
 
 
 def read_trsqq():
     'Read trsqq list, dictionary, and dataframe'    
-    with open(os.path.join(inpath, 'trsqq_list.pkl'), 'rb') as f:
+    with open(os.path.join(INPATH, 'trsqq_list.pkl'), 'rb') as f:
         trsqq = pickle.load(f)
-    with open(os.path.join(inpath, 'trsqq_dict.pkl'), 'rb') as f:
+    with open(os.path.join(INPATH, 'trsqq_dict.pkl'), 'rb') as f:
         trsqq_dict = pickle.load(f) 
-    df = pd.read_csv(os.path.join(inpath, 'trsqq_df.csv'))
+    df = pd.read_csv(os.path.join(INPATH, 'trsqq_df.csv'))
     return trsqq, trsqq_dict, df
 
 # More to deal with later...
@@ -99,16 +98,16 @@ tid_dst = [
 tid_dst_0 = list(map(lambda x: re.split("--", x)[0], tid_dst))
 tid_dst_1 = list(map(lambda x: re.split("--", x)[1], tid_dst))
 tsq_dst = ttdf[ttdf.ORTaxlot.isin(tid_dst)].trsqq.unique()
-cnts = gpd.read_file(inpath + '\\GIS\\Oregon_Counties.shp')
+cnts = gpd.read_file(f'{INPATH}\\GIS\\Oregon_Counties.shp')
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
 
-with open(os.path.join(inpath, 'ORTaxlot.pkl'), 'rb') as f:
+with open(os.path.join(INPATH, 'ORTaxlot.pkl'), 'rb') as f:
     all_txid = pickle.load(f)
 
-with open(os.path.join(inpath, 'ORMapIndex.pkl'), 'rb') as f:
+with open(os.path.join(INPATH, 'ORMapIndex.pkl'), 'rb') as f:
     all_mpidx = pickle.load(f)
 
-with open(os.path.join(inpath, 'ParticipCnt.pkl'), 'rb') as f:
+with open(os.path.join(INPATH, 'ParticipCnt.pkl'), 'rb') as f:
     county_list = pickle.load(f)
 
 
@@ -117,11 +116,7 @@ with open(os.path.join(inpath, 'ParticipCnt.pkl'), 'rb') as f:
 #pd.options.mode.chained_assignment = None
 
 
-# TODO: Big sections like this indicate code that should prob be grouped
-# together in a class or module...
 # Taxlot Review ###################################################
-
-# TODO: continue here--refactor
 def read_taxlots(year):
     return TaxlotReader(TAXLOT_PATH, county_list).read(year)
 
@@ -129,6 +124,7 @@ def read_taxlots(year):
 readTaxlots = read_taxlots
 
 
+# TODO: continue here--refactor
 def readMapIndex(year):
     colnms = ['County', 'ORMapNum', 'geometry']
     if year == 2012:
@@ -293,7 +289,7 @@ def read_all_mapIdx(exportID=False):
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     if exportID:
-        with open(os.path.join(inpath, "ORMapIndex.pkl"), "wb") as f:
+        with open(os.path.join(INPATH, "ORMapIndex.pkl"), "wb") as f:
             pickle.dump(list(gdf.ORMapNum.unique()), f) 
     return gdf
     
@@ -301,8 +297,9 @@ def read_mapIdx(year):
     """
     read mapIndex from one year
     """
-    mapindex = gpd.read_file(inpath+f'\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years\\Taxlots{year}.gdb', 
-                             layer='MapIndex')
+    mapindex = gpd.read_file(
+        f'{INPATH}\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years\\Taxlots{year}.gdb', 
+        layer='MapIndex')
     return mapindex
 
 def replace_geometry(gdf):
@@ -311,7 +308,7 @@ def replace_geometry(gdf):
     gdf is the geodataframe that contains the SA polygons to replace
     rid is record ID
     """
-    revpath = inpath + '\\GIS\\ArcGIS Pro Project\\DataReview\\DataReview.gdb'
+    revpath = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\DataReview.gdb'
     newplys = [lyr for lyr in fiona.listlayers(revpath) if 'rid' in lyr]
     frames = []
     for nply in newplys:
@@ -448,7 +445,7 @@ def get_all_wd(num, raw=False):
     return wd_df
 
 def get_added_SA():
-    path = inpath + "\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb"
+    path = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb'
     lyrs = [lyr for lyr in fiona.listlayers(path)]
     frames = []
     for lyr in lyrs:
@@ -514,10 +511,10 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=
     if export:
         sa_gdf=sa_gdf.rename(columns=coldict)
         try:
-            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
+            sa_gdf.to_file(os.path.join(INPATH, "output", "final", f"{outnm}.shp"), index=False)
         except RuntimeError:
             sa_gdf['geometry'] = sa_gdf.geometry.buffer(0)
-            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
+            sa_gdf.to_file(os.path.join(INPATH, "output", "final", f"{outnm}.shp"), index=False)
     return sa_gdf
  
 ################################################ Report #########################################################
@@ -543,7 +540,7 @@ def read_list(setid):
     """
     read a list 
     """
-    with open(os.path.join(inpath, f"{setid}_mapped.pkl"), "rb") as f:
+    with open(os.path.join(INPATH, f"{setid}_mapped.pkl"), "rb") as f:
         lst = pickle.load(f)
     return lst
 
@@ -581,7 +578,7 @@ def writelist(lst, lstnm, setID):
     """
     write a list to a pickle file
     """
-    with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
+    with open(os.path.join(INPATH, f'{setID}_{lstnm}.pkl'), 'wb') as f:
             pickle.dump(lst, f)
     
 def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False, wd_id=None, wddf=None):
@@ -590,7 +587,8 @@ def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False
     """
     toadd=[]
     if not partial:
-        df = pd.read_csv(os.path.join(inpath + f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
+        df = pd.read_csv(os.path.join(
+            INPATH, f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
     if df is not None:
         wdid_list = list(df.wetdet_delin_number.unique())
     else:
@@ -646,7 +644,11 @@ def review_loop(setID):
     loop through the unmatched records and check the review notes
     df is from r2 notes
     """
-    df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_N_0.csv'))
+    df = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'review_unmatched_{setID}_r2_N_0.csv'))
     df = df.reset_index()
     for i in range(df.shape[0]):
         wdID = df.loc[i, 'wetdet_delin_number']
@@ -677,13 +679,14 @@ def check_completeness(setID='003', a=3):
     check completeness of the mapping
     a: numbers to add, for the records that are edited in the matched records directly
     """
-    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\Set{setID}.gdb'
+    revpath = f'{INPATH}\GIS\ArcGIS Pro Project\DataReview\Set{setID}.gdb'
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     mapped1 = list(partial.wdID.unique())
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'Set{setID}_wo_lot', f'Set{setID}_partial']) and ('L' not in lyr)]
     mapped2 = list(map(lambda x: x.replace('_', '-'), mapped0))
     mapped = mapped1 + mapped2
-    matched = gpd.read_file(inpath + f'\\output\matched\matched_records_Set{setID}_edited.shp')
+    matched = gpd.read_file(
+        f'{INPATH}\\output\matched\matched_records_Set{setID}_edited.shp')
     pct = (len(mapped)+a)/len(matched[~matched.notes.isnull()].wdID.unique())
     print(f'{round(pct*100, 1)}% completed...')
     return sorted(mapped), len(mapped)
@@ -721,7 +724,7 @@ def review_mapped(setID):
     """
     Review the mapped taxlots
     """
-    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    revpath = f'{INPATH}\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     for wID in mapped0:
         gdf = gpd.read_file(revpath, layer=wID)
@@ -742,7 +745,7 @@ def revise_single_partial_file(setID, wID, from_set=True):
     Revise the geometry of a single partial taxlot
     """
     if from_set:
-        revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+        revpath = f'{INPATH}\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
     else:
         revpath = issuepath   
     gdf = gpd.read_file(revpath, layer=wID)
@@ -776,10 +779,11 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     """
     Combine the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
     """
-    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    revpath = f'{INPATH}\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
     # get separated feature files
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
-    matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
+    matched = gpd.read_file(
+        f'{INPATH}\\output\matched\matched_records_{setID}_edited.shp')
     # get edited feature in the original matches
     edited_gdf = matched[matched.wdID.isin(editedIDs)]
     edited_gdf = edited_gdf[['wdID', 'geometry']].dissolve('wdID')
@@ -802,7 +806,7 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     data2 = edited_gdf.append(data1[['wdID', 'code', 'geometry']], ignore_index=True)
     # exclude the ones that were digitized or edited in the original matches
     excluded = [wdID for wdID in data2.wdID.unique() if wdID in matched.wdID.unique()]
-    issues = pd.read_csv(os.path.join(inpath, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
+    issues = pd.read_csv(os.path.join(INPATH, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
     # exclude the ones that have issues
     issueIDs = list(issues.wetdet_delin_number.unique())
     file = outpath+f"\\matched\\{setID}_reviewed.txt"
@@ -834,7 +838,8 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
             editedIDs1 = f.readlines()
         final_gdf.loc[final_gdf.wdID.isin(editedIDs1), 'code'] = 1
     if export:
-        final_gdf.to_file(os.path.join(inpath, "output", "final", f"mapped_wd_{setID}.shp"), index=False)
+        final_gdf.to_file(os.path.join(
+            INPATH, "output", "final", f"mapped_wd_{setID}.shp"), index=False)
     return final_gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
 
 def run_Tier3_4_final(setID, nm_to_add):
@@ -843,9 +848,10 @@ def run_Tier3_4_final(setID, nm_to_add):
     gdf: the final shapefile that combined both automatic matches and digitized records
     """
     start = time.time()
-    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    revpath = f'{INPATH}\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
     wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
-    matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
+    matched = gpd.read_file(
+        f'{INPATH}\\output\matched\matched_records_{setID}_edited.shp')
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     with open(outpath+f'\\matched\\{setID}_edited.txt') as f:
@@ -872,7 +878,7 @@ def get_point_from_lonlat(lon, lat, transprj=True, export=True):
     if transprj:
         gdf = gdf.to_crs(epsg=2992)
     if export:
-        gdf.to_file(inpath + '\\test\point.shp')
+        gdf.to_file(f'{INPATH}\\test\point.shp')
     return gdf
 
 # point in polygon - WD point in taxtlot
@@ -1163,8 +1169,13 @@ def split_unmatched_df(df, ml, setID, export=True):
     r2_df = df[df[IDcol].isin(value_counts[value_counts == 1].index)]
     r2_df = r2_df[((r2_df.latitude.astype(str) != 'nan')|(r2_df.longitude.astype(str) != 'nan'))]
     if export:
-        r1_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r1_{ml}.csv'), index=False)
-        r2_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_{ml}.csv'), index=False)
+        r1_df.to_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'unmatched_df_{setID}_r1_{ml}.csv'),
+            index=False)
+        r2_df.to_csv(os.path.join(INPATH, '\\output\\to_review\\', f'unmatched_df_{setID}_r2_{ml}.csv'), index=False)
     return r1_df, r2_df
 
 def generate_taxlot_output(df, taxlot, setID, ml, export=False):
@@ -1180,7 +1191,10 @@ def generate_taxlot_output(df, taxlot, setID, ml, export=False):
     taxlots_to_review_2 = taxlots_to_review.merge(df, on='ORTaxlot')
     taxlots_to_review_2.drop(columns=['pairs'], inplace=True)
     if export:
-        taxlots_to_review_2.to_file(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}.shp'))
+        taxlots_to_review_2.to_file(os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'review_unmatched_{setID}_r2_{ml}.shp'))
     return taxlots_to_review_2
 
 def taxlot_from_coord(x):
@@ -1232,7 +1246,12 @@ def review_unmatched_df_r2(df, taxlot, setID, ml, export=True):
         outdf.loc[sel2, 'cor_trsqq'], outdf.loc[sel2, 'ORTaxlot'] = zip(*outdf.loc[sel2, 'correction'].apply(lambda x: trsqq_from_nearby_taxlot(x)))
 
     if export:
-        outdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_0.csv'), index=False)
+        outdf.to_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'review_unmatched_{setID}_r2_{ml}_0.csv'),
+            index=False)
     return outdf
 
 trsqq_cor_dict = {'township number': 0, 
@@ -1276,7 +1295,11 @@ def correct_unmatched(df, setID, s, ml, export=True):
     ml (missing lot): whether the unmatched records are missing parcel id in digit
     export: whether to export the corrected unmatched records
     """
-    notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_{s}_{ml}_notes.csv'))
+    notes = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'unmatched_df_{setID}_{s}_{ml}_notes.csv'))
     notes = adjust_cor_from_to(notes)
     rID = 'record_ID' in notes.columns
     df = df.copy()[df.wetdet_delin_number.isin(notes.wetdet_delin_number.unique())]
@@ -1325,7 +1348,12 @@ def correct_unmatched(df, setID, s, ml, export=True):
                     #     to = to.zfill(2)
                     df.loc[sel, field] = df.loc[sel, field].apply(lambda x: x.replace(notes.loc[sel2, 'from'].values[0], to))
     if export:
-        df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{s}_{ml}_1.csv'), index=False)
+        df.to_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'review_unmatched_{setID}_{s}_{ml}_1.csv'),
+            index=False)
     return df
 
 # need to run review_unmatched_df_r2 and do some manual work frist to get the notes
@@ -1338,8 +1366,16 @@ def update_unmatched_df_r2(df, setID, ml, export=True):
     export: whether to export the updated unmatched df
     """
     # rev_df is the output from review_unmatched_df_r2, nt_df is from manual input
-    rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_0.csv'))
-    nt_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_{ml}_notes.csv'))
+    rev_df = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'review_unmatched_{setID}_r2_{ml}_0.csv'))
+    nt_df = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'unmatched_df_{setID}_r2_{ml}_notes.csv'))
     df = df.copy()[~df.wetdet_delin_number.isin(nt_df.wetdet_delin_number.unique())]
     rev_df = rev_df.copy()[~rev_df.wetdet_delin_number.isin(nt_df.wetdet_delin_number.unique())]
     rev_df = rev_df[['wetdet_delin_number', 'cor_trsqq']]
@@ -1347,10 +1383,19 @@ def update_unmatched_df_r2(df, setID, ml, export=True):
     selectedID = ndf.cor_trsqq.astype(str) != 'nan'
     ndf.loc[selectedID, 'trsqq'] = ndf.loc[selectedID, 'cor_trsqq'].apply(lambda x: x.rstrip('0'))
     ndf.drop(columns='cor_trsqq', inplace=True)
-    rev_df = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_1.csv'))
+    rev_df = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'review_unmatched_{setID}_r2_{ml}_1.csv'))
     rdf = ndf.append(rev_df, ignore_index = True)
     if export:
-        rdf.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'), index=False)
+        rdf.to_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'review_unmatched_{setID}_r2_{ml}_2.csv'),
+            index=False)
     return rdf
 
 def combine_corrected_unmatched(setID, ml, skip=True, export=True):
@@ -1359,15 +1404,31 @@ def combine_corrected_unmatched(setID, ml, skip=True, export=True):
     setID: the setID of the unmatched records
     ml (missing lot): whether the unmatched records are missing parcel id in digit
     """
-    rev_df1 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r1_{ml}_1.csv'))
+    rev_df1 = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'review_unmatched_{setID}_r1_{ml}_1.csv'))
     # if skip update_unmatched_df_r2
     if skip:
-        rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_1.csv'))
+        rev_df2 = pd.read_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'review_unmatched_{setID}_r2_{ml}_1.csv'))
     else:    
-        rev_df2 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}_2.csv'))
+        rev_df2 = pd.read_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'review_unmatched_{setID}_r2_{ml}_2.csv'))
     df = rev_df1.append(rev_df2, ignore_index = True)
     if export:
-        df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_{ml}.csv'), index=False)
+        df.to_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'review_unmatched_{setID}_{ml}.csv'), index=False)
     return df
 
 def review_WD_record_via_Pro(gdf, wdID):
@@ -1378,7 +1439,7 @@ def review_WD_record_via_Pro(gdf, wdID):
     return the gdf of the unmatched records
     """
     gdf = gdf[gdf.wdID == wdID]
-    gdf.to_file(os.path.join(inpath, 'output', 'wd_shp', wdID + '.shp'))
+    gdf.to_file(os.path.join(INPATH, 'output', 'wd_shp', wdID + '.shp'))
     return gdf
 
 # make sure ORTaxlot is in the right format from df
@@ -1397,7 +1458,12 @@ def get_taxlot_to_check_r2(revdf, taxlot, setID, ml):
     taxlots_to_review_2.rename(columns={'wetdet_delin_number': 'wdID', 
                       'DecisionLink':'doc_link',
                       'correct_type':'cor_type'}, inplace=True)
-    taxlots_to_review_2.to_file(os.path.join(inpath, 'output', 'to_review', f'review_unmatched_{setID}_r2_{ml}.shp'))
+    taxlots_to_review_2.to_file(
+        os.path.join(
+            INPATH,
+            'output',
+            'to_review',
+            f'review_unmatched_{setID}_r2_{ml}.shp'))
     return taxlots_to_review_2
 
 def adjust_taxlot(tx, ty):
@@ -1443,16 +1509,33 @@ def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
     matched_toReview = matched[matched.notes.notnull()] 
     wd_toReview = wd[wd.wetdet_delin_number.isin(matched_toReview.wdID.unique())]
     wd_toReview.to_csv(outpath + f'\\to_review\\partial_matched_{setID}.csv', index=False)
-    unmatched_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_2.csv'), index=False)
+    unmatched_df.to_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'unmatched_df_{setID}_2.csv'),
+        index=False)
     return matched, unmatched_df
 
 def report2DSL(setID):
     """
     generate the correction report for DSL
     """
-    r2_0 = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_N_0.csv'))
-    r1_notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r1_N_notes.csv'))
-    r2_notes = pd.read_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}_r2_N_notes.csv'))
+    r2_0 = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'review_unmatched_{setID}_r2_N_0.csv'))
+    r1_notes = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'unmatched_df_{setID}_r1_N_notes.csv'))
+    r2_notes = pd.read_csv(
+        os.path.join(
+            INPATH,
+            '\\output\\to_review\\',
+            f'unmatched_df_{setID}_r2_N_notes.csv'))
     cordf = r1_notes.append(r2_notes, ignore_index=True)
     matched = gpd.read_file(outpath + f'\\matched\\matched_records_{setID}.shp')
     corrected = matched[matched.record_ID.isin(cordf.record_ID.values)][['wdID','trsqq', 'parcel_id', 'record_ID']].drop_duplicates(ignore_index=True)
@@ -1879,7 +1962,7 @@ def combine_taxlot(exportID=False,
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     if exportID:
-        with open(os.path.join(inpath, "ORTaxlot.pkl"), "wb") as f:
+        with open(os.path.join(INPATH, "ORTaxlot.pkl"), "wb") as f:
             pickle.dump(list(gdf.ORTaxlot.unique()), f) 
     return gdf
 
@@ -1955,12 +2038,20 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
         ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
         if update:
-            matched = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'))
+            matched = gpd.read_file(
+                os.path.join(
+                    INPATH,
+                    f'\\{outfolder}\\',
+                    f'matched_records_{setID}.shp'))
             ngdf = matched.append(ngdf[selcols], ignore_index = True)
         if export: 
             # the update will overwrite the first output
-            ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
-                                                    driver='ESRI Shapefile')  
+            ngdf[~ngdf.geometry.isnull()][selcols].to_file(
+                os.path.join(
+                    INPATH,
+                    f'\\{outfolder}\\',
+                    f'matched_records_{setID}.shp'), 
+                driver='ESRI Shapefile')  
         return ngdf
     else:
         print('no matched records found')
@@ -1987,7 +2078,12 @@ def report_unmatched(gdf, setID, nm_to_add, mute = True, export=False):
         print(f'it is about {r}% of data in the original {wd_df.shape[0]} records unmatched')
         print(f'there are {nc} records ({nr}% of the original records) without parcel id')
     if export:
-        sorted_df.to_csv(os.path.join(inpath + '\\output\\to_review\\', f'unmatched_df_{setID}.csv'), index=False)  
+        sorted_df.to_csv(
+            os.path.join(
+                INPATH,
+                '\\output\\to_review\\',
+                f'unmatched_df_{setID}.csv'),
+            index=False)  
     return sorted_df
     
 def compare_data_report(gdf, setID, nm_to_add, export = False):
@@ -2001,7 +2097,9 @@ def compare_data_report(gdf, setID, nm_to_add, export = False):
     unmatched_wd_df = report_unmatched(gdf, setID, nm_to_add)
     # unmatched IDs from the run
     missed_ID = unmatched_wd_df.record_ID.unique()
-    setgdf = gpd.read_file(os.path.join(inpath, 'GIS', 'Join_Statewide.gdb'), layer=f'WD_{setID}_Combined')
+    setgdf = gpd.read_file(
+        os.path.join(
+            INPATH, 'GIS', 'Join_Statewide.gdb'), layer=f'WD_{setID}_Combined')
     setgdf.loc[setgdf.Record_ID.astype(str) != 'nan', 'Record_ID'] = setgdf[setgdf.Record_ID.astype(str) != 'nan'].Record_ID.astype('int64', copy=False)
     matched_rID = gdf.record_ID.unique()
     # missed IDs in the existing data that is not nan
@@ -2017,9 +2115,12 @@ def compare_data_report(gdf, setID, nm_to_add, export = False):
     if export:
         if missed_gdf.shape[0] > 0:
             selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
-            missed_gdf[~missed_gdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\',
-                                                                           f'missed_records_in_{setID}_res.shp'), 
-                                                              driver='ESRI Shapefile')
+            missed_gdf[~missed_gdf.geometry.isnull()][selcols].to_file(
+                os.path.join(
+                    INPATH,
+                    f'\\{outfolder}\\',
+                    f'missed_records_in_{setID}_res.shp'), 
+                driver='ESRI Shapefile')
         if added_gdf.shape[0] > 0:
             added_gdf.rename(columns={'wetdet_delin_number': 'wdID', 
                       'address_location_desc':'loc_desc', 
@@ -2036,8 +2137,12 @@ def compare_data_report(gdf, setID, nm_to_add, export = False):
                       'Edits_Complete': 'edits', 
                       'Shape_Length':'Shp_Length'           
                       }, inplace=True)
-            added_gdf.to_file(os.path.join(inpath + f'\\{outfolder}\\', f'added_records_in_{setID}_res.shp'), 
-                                                      driver='ESRI Shapefile')
+            added_gdf.to_file(
+                os.path.join(
+                    INPATH,
+                    f'\\{outfolder}\\',
+                    f'added_records_in_{setID}_res.shp'), 
+                driver='ESRI Shapefile')
         
     return missed_match_ID, missed_gdf, addedID, added_gdf, missed_ID
 
@@ -2072,7 +2177,9 @@ def review_mapped_data(df, setID, all_taxlot, nm_to_add, export=False):
     input df is the reindexed dataframe from combined_reindexed_data
     return mapped data (and missed matched data) from the existing
     """
-    setgdf = gpd.read_file(os.path.join(inpath, 'GIS', 'Join_Statewide.gdb'), layer=f'WD_{setID}_Combined')
+    setgdf = gpd.read_file(
+        os.path.join(INPATH, 'GIS', 'Join_Statewide.gdb'),
+        layer=f'WD_{setID}_Combined')
     to_map_rID = review_with_lots(df, setID, all_taxlot, nm_to_add)[2]
     mapped = setgdf[setgdf.Record_ID.isin(to_map_rID)]
     if export:
@@ -2091,8 +2198,12 @@ def review_mapped_data(df, setID, all_taxlot, nm_to_add, export=False):
                       'Edits_Complete': 'edits'
                       })
         selcols = list(mapped.columns[list(map(lambda x: x <= 10, list(map(len, list(mapped.columns)))))])
-        mapped[selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'mapped_in_{setID}.shp'), 
-                                                  driver='ESRI Shapefile')
+        mapped[selcols].to_file(
+            os.path.join(
+                INPATH,
+                f'\\{outfolder}\\',
+                f'mapped_in_{setID}.shp'), 
+            driver='ESRI Shapefile')
     return mapped
 
 def check_corrected_data(df, setID, all_taxlot, nm_to_add, export=False):
@@ -2101,8 +2212,11 @@ def check_corrected_data(df, setID, all_taxlot, nm_to_add, export=False):
     input df is reindexed from combined_reindexed_data
     return matched data with corrected info
     """ 
-    corrected = pd.read_excel(os.path.join(inpath, 'DSL data originals', 'Data corrections feedback to DSL', 
-                           f'DSL Database corrections {setID}.xlsx'))
+    corrected = pd.read_excel(
+        os.path.join(
+            INPATH,
+            'DSL data originals', 'Data corrections feedback to DSL', 
+            f'DSL Database corrections {setID}.xlsx'))
     corrected.rename(columns={'trsqq': 'cor_trsqq',
                               'parcel_id':'cor_parcel_id'}, inplace=True)
     res = review_with_lots(df, setID, all_taxlot, nm_to_add)
@@ -2136,7 +2250,12 @@ def check_corrected_data(df, setID, all_taxlot, nm_to_add, export=False):
     if export:
         ngdf = gpd.GeoDataFrame(ndf, crs="EPSG:2992", geometry='geometry')
         selcols = ['wdID', 'trsqq', 'parcel_id', 'notes', 'lots', 'lot', 'ORTaxlot', 'record_ID', 'geometry']
-        ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + '\\output\\matched\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')
+        ngdf[~ngdf.geometry.isnull()][selcols].to_file(
+            os.path.join(
+                INPATH,
+                '\\output\\matched\\',
+                f'matched_records_{setID}.shp'),
+            driver='ESRI Shapefile')
     return ndf, cor_df, comIDs, df_wlots_to_check
 
 Tdict = dict(zip(['.25S', '.50S', '.50N', '.75S'], ['Z', 'V', 'Y', 'X']))
@@ -2222,11 +2341,11 @@ def get_trsqq_list():
     trsqq = list(map(lambda x: taxlot2trsqq(x), taxlotIDs_cleaned))
     trsqq_dict = dict(zip(trsqq, taxlotIDs_cleaned))
     df = pd.DataFrame({'ORTaxlot':taxlotIDs_cleaned, 'trsqq':trsqq})
-    with open(os.path.join(inpath, "trsqq_list.pkl"), "wb") as f:
+    with open(os.path.join(INPATH, "trsqq_list.pkl"), "wb") as f:
         pickle.dump(trsqq, f)
-    with open(os.path.join(inpath, "trsqq_dict.pkl"), "wb") as f:
+    with open(os.path.join(INPATH, "trsqq_dict.pkl"), "wb") as f:
         pickle.dump(trsqq_dict, f)
-    df.to_csv(os.path.join(inpath, "trsqq_df.csv"), index=False)
+    df.to_csv(os.path.join(INPATH, "trsqq_df.csv"), index=False)
     return trsqq, trsqq_dict, df
 
 def get_maybe_taxlot(trsqq_to_check):
