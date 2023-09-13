@@ -1,38 +1,40 @@
-import pandas as pd
-import geopandas as gpd
+import collections
+from collections import Counter
+import datetime
+from datetime import date
+import difflib
+import io
+from itertools import chain
+import json
 import os
 from os import walk
-import zipfile
-import re
-import numpy as np
-from itertools import chain
-import time
-import collections
-import datetime
-import string
-import difflib
 import pickle
+from random import sample
+import re
+import string
+import time
+import warnings
+import webbrowser
+import zipfile
+
+import fiona
+import geopandas as gpd
 import geopy
 from geopy.geocoders import Nominatim
-from urllib.request import urlopen
-import io
-import requests
-from PyPDF2 import PdfReader, PdfWriter
-import fiona
-import webbrowser
-import time
 import googlemaps
-import json
+import numpy as np
 import openpyxl
-from collections import Counter
-from datetime import date
-from win32com.client import Dispatch
-from shapely.validation import make_valid
-import warnings
-from shapely.errors import ShapelyDeprecationWarning
+import pandas as pd
+from PyPDF2 import PdfReader, PdfWriter
 from pyproj import Transformer
-from random import sample
+import requests
 from shapely.geometry import shape
+from shapely.validation import make_valid
+from shapely.errors import ShapelyDeprecationWarning
+from urllib.request import urlopen
+from win32com.client import Dispatch
+
+
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
