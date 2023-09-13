@@ -1,3 +1,4 @@
+# TODO: replace paths with pathlib.Path
 import collections
 from collections import Counter
 import difflib
@@ -32,8 +33,9 @@ from win32com.client import Dispatch
 
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
-google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
 
+# Clean up for now; will deal with placement later...
+google_key = json.load(open('config/keys.json'))['google_maps']['APIKEY']
 inpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 outpath = inpath + '\\output'
 wdpath = inpath + '\\DSL data originals'
@@ -42,138 +44,181 @@ yearstart = 2016
 yearend = 2023
 #outfolder = 'test'
 outfolder = 'output\\matched'
-# create a spreadsheet to create a dictionary for the match between county name and code
+# create a spreadsheet to create a dictionary for the match between county name
+# and code
 cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
 # create a dictionary to look up county code
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
-trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
+trsqq_correction_dict = dict(
+    zip(
+        list(range(0, 6)),
+        ['township number', 'township direction', 'range number',
+         'range direction', 'section number', 'QQ']))
 OR_counties = list(cnt_dict.keys())
 nm2add = [0, 1420, 2143, 2878, 3932, 4370]
-selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
-           'city', 'county', 'site_name', 'site_desc','latitude',
-           'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
-           'status_name', 'received_date', 'response_date','reissuance_response_date', 
-           'project_id', 'site_id', 'SetID','record_ID', 'ORMapNum']
+selectedvars = [
+    'wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
+    'city', 'county', 'site_name', 'site_desc','latitude',
+    'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
+    'status_name', 'received_date', 'response_date','reissuance_response_date',
+    'project_id', 'site_id', 'SetID','record_ID', 'ORMapNum']
 varlist = selectedvars + ['geometry', 'code']
 transformer = Transformer.from_crs("EPSG:2992", "EPSG:4326")
-coldict = {'wetdet_delin_number': 'wdID', 
-           'address_location_desc':'loc_desc', 
-           'Coord-Source':'CordSource',
-           'DocumentName':'doc_name',
-           'DecisionLink':'doc_link',
-           'is_batch_file':'isbatfile',
-           'status_name': 'status_nm',
-           'received_date':'receiveddt', 
-           'response_date':'responsedt',
-           'reissuance_response_date':'reissuance'}
+coldict = {
+    'wetdet_delin_number': 'wdID', 
+    'address_location_desc':'loc_desc', 
+    'Coord-Source':'CordSource',
+    'DocumentName':'doc_name',
+    'DecisionLink':'doc_link',
+    'is_batch_file':'isbatfile',
+    'status_name': 'status_nm',
+    'received_date':'receiveddt', 
+    'response_date':'responsedt',
+    'reissuance_response_date':'reissuance'}
 issuepath = inpath + '\\GIS\\ArcGIS Pro Project\\DataReview\\issueIDs.gdb'
 
+
 def read_trsqq():
-    """
-    read trsqq list, dictionary, and dataframe
-    """    
-    with open(os.path.join(inpath, "trsqq_list.pkl"), "rb") as f:
+    'Read trsqq list, dictionary, and dataframe'    
+    with open(os.path.join(inpath, 'trsqq_list.pkl'), 'rb') as f:
         trsqq = pickle.load(f)
-    with open(os.path.join(inpath, "trsqq_dict.pkl"), "rb") as f:
+    with open(os.path.join(inpath, 'trsqq_dict.pkl'), 'rb') as f:
         trsqq_dict = pickle.load(f) 
-    df = pd.read_csv(os.path.join(inpath, "trsqq_df.csv"))
+    df = pd.read_csv(os.path.join(inpath, 'trsqq_df.csv'))
     return trsqq, trsqq_dict, df
 
+# More to deal with later...
 trsqq, trsqq_dict, ttdf = read_trsqq()
-tid_dst = [tid for tid in ttdf.ORTaxlot.unique() if any(substring in tid for substring in ['--D', '--S', '--T'])]
+tid_dst = [
+    tid for tid in ttdf.ORTaxlot.unique()
+    if any(substring in tid for substring in ['--D', '--S', '--T'])]
 tid_dst_0 = list(map(lambda x: re.split("--", x)[0], tid_dst))
 tid_dst_1 = list(map(lambda x: re.split("--", x)[1], tid_dst))
 tsq_dst = ttdf[ttdf.ORTaxlot.isin(tid_dst)].trsqq.unique()
-cnts = gpd.read_file(inpath + "\\GIS\\Oregon_Counties.shp")
-
+cnts = gpd.read_file(inpath + '\\GIS\\Oregon_Counties.shp')
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
+
 with open(os.path.join(inpath, "ORTaxlot.pkl"), "rb") as f:
     all_txid = pickle.load(f)
+
 with open(os.path.join(inpath, "ORMapIndex.pkl"), "rb") as f:
     all_mpidx = pickle.load(f)
+
 with open(os.path.join(inpath, "ParticipCnt.pkl"), "rb") as f:
     cntlst = pickle.load(f)
-pd.options.mode.chained_assignment = None
 
-############################################### Taxlot Review ###################################################
-def removeCountyNm(x, toRemove):
-    """
-    remove county name from strings
-    """      
+
+# Bad idea to use this globally... this warning exists for a reason; better
+# to deactivate only where you are certain it is not an issue
+#pd.options.mode.chained_assignment = None
+
+
+# TODO: Big sections like this indicate code that should prob be grouped
+# together in a class or module...
+# Taxlot Review ###################################################
+def remove_county_name(x, to_remove):
+    # TODO: what are the types of <x> nd <to_remove>? Document
+    'Remove county name from strings'
     tf = [tr in x for tr in toRemove]
     tr = [tr for tr in toRemove if tr in x]
     if any(tf):
-        x=re.sub(tr[0], '', x)
+        x = re.sub(tr[0], '', x)
     return x
 
-def readGeoData(layer_file):
-    """
-    read geodata with a geometry check
-    """ 
+
+# For backwards compatibility
+def removeCountryNm = remove_country_name
+
+
+def read_geo_data(layer_file):
+    'Read geodata with a geometry check'
     try:
         gdf = gpd.read_file(layer_file)
     except ValueError:
-        collection = list(fiona.open(layer_file,'r'))
-        df1 = pd.DataFrame(collection)
+        collection = list(fiona.open(layer_file, 'r'))
+        df = pd.DataFrame(collection)
 
-        #Check Geometry
-        def isvalid(geom):
+        # Check Geometry
+        def is_valid(geom):
             try:
                 shape(geom)
                 return 1
             except:
                 return 0
-        df1['isvalid'] = df1['geometry'].apply(lambda x: isvalid(x))
-        df1 = df1[df1['isvalid'] == 1]
-        collection = json.loads(df1.to_json(orient='records'))
 
-        #Convert to geodataframe
+        df['isvalid'] = df1['geometry'].apply(lambda x: is_valid(x))
+        df = df[df['isvalid'] == 1]
+        collection = json.loads(df.to_json(orient='records'))
+        # Convert to geodataframe
         gdf = gpd.GeoDataFrame.from_features(collection)
     return gdf
 
-def readTaxlots(year):
-    """
-    read taxlots prior to 2017 
-    """
+
+def readGeoData = read_geo_data
+
+
+# TODO: continue here--refactor
+def read_taxlots(year):
+    'Read taxlots prior to 2017'
     frames = []
-    listcols = ['County', 'Town', 'TownPart', 'TownDir', 'Range','RangePart','RangeDir', 'SecNumber',
-                'Qtr', 'QtrQtr', 'Anomaly', 'MapSufType', 'MapNumber', 'ORMapNum', 'Taxlot','MapTaxlot',
-                'ORTaxlot']
+    listcols = [
+        'County', 'Town', 'TownPart', 'TownDir', 'Range', 'RangePart',
+        'RangeDir', 'SecNumber', 'Qtr', 'QtrQtr', 'Anomaly', 'MapSufType',
+        'MapNumber', 'ORMapNum', 'Taxlot','MapTaxlot', 'ORTaxlot']
     selcols = list(map(lambda x: x.capitalize(), listcols))
-    gdb = txpath+f'\\Taxlots{year}.gdb'
+    gdb = txpath + f'\\Taxlots{year}.gdb'
     if year in range(2016, 2018):      
         txlot = gpd.read_file(gdb, layer='Taxlots')
         if all([col in txlot.columns for col in listcols]):
             txlot = txlot[listcols]
         else:
-            print(f"check the column names of the {year} taxlots!")
+            print(f'check the column names of the {year} taxlots!')
         frames.append(txlot)
     elif year in [2011, 2014, 2015]:
         lyrlist = fiona.listlayers(gdb)
-        lyrsel = [x for x in lyrlist if x not in list(filter(lambda x : re.search(r"_prop_tbl|_TaxCode", x), lyrlist))]
+        lyrsel = [
+            x for x in lyrlist
+            if x not in list(
+                filter(lambda x: re.search(r'_prop_tbl|_TaxCode', x), lyrlist))
+        ]
         if year != 2011:
             lyrsel = [lyr for lyr in lyrsel if lyr in cntlst]
         else:
-            lyrsel = [lyr for lyr in lyrsel if (lyr in cntlst) and (lyr != 'Jefferson')]
-        toRemove = list(map(lambda x: x+'_', lyrsel))
+            lyrsel = [
+                lyr for lyr in lyrsel
+                if (lyr in cntlst) and (lyr != 'Jefferson')]
+        toRemove = list(map(lambda x: x + '_', lyrsel))
         for lyr in sorted(lyrsel):
             print(lyr)
             txlot = gpd.read_file(gdb, layer=lyr)
             lst = list(map(lambda x: re.sub(r'[0-9]', '', x), txlot.columns))
-            colnms = list(map(lambda x:removeCountyNm(x, toRemove), lst))
+            colnms = list(map(lambda x: removeCountyNm(x, toRemove), lst))
             txlot.columns = colnms
             if year != 2011:
-                txt = 'taxlot__|taxlot_|Taxlots_|TAXLOT_|Taxlot_|taxlots_|TaxLot_'
-                colsel = list(filter(lambda x: re.search(txt, x, re.IGNORECASE), colnms))
-                colsel = unique([col for col in colsel if col not in ['Taxlots_F', 'Taxlots_Map_Taxlo', 'Taxlots_Accnum']])
-                ncolnms = list(map(lambda x: re.sub(txt, '', x, re.IGNORECASE), colsel))
+                txt = (
+                    'taxlot__|taxlot_|Taxlots_|TAXLOT_|Taxlot_|taxlots_|'
+                    'TaxLot_')
+                colsel = list(
+                    filter(lambda x: re.search(txt, x, re.IGNORECASE), colnms))
+                colsel = unique(
+                    [col for col in colsel if col not in [
+                        'Taxlots_F', 'Taxlots_Map_Taxlo', 'Taxlots_Accnum']])
+                ncolnms = list(
+                    map(lambda x: re.sub(txt, '', x, re.IGNORECASE), colsel))
                 txlot = txlot[colsel]
                 txlot.columns = list(map(lambda x: x.capitalize(), ncolnms))
             else:
-                if all([colnm in colnms for colnm in ['MapTaxlot', 'Maptaxlot']]):
-                    colsel = [col for col in colnms if col not in check_duplicates(colnms)[0]+['Maptaxlot']]
+                if all(
+                        [colnm in colnms
+                         for colnm in ['MapTaxlot', 'Maptaxlot']]):
+                    colsel = [
+                        col for col in colnms
+                        if col not in (
+                            check_duplicates(colnms)[0] + ['Maptaxlot'])]
                 else:
-                    colsel = [col for col in colnms if col not in check_duplicates(colnms)[0]]
+                    colsel = [
+                        col for col in colnms
+                        if col not in check_duplicates(colnms)[0]]
                 txlot = txlot[colsel]
                 txlot.columns = list(map(lambda x: x.capitalize(), colsel))
             txlot = txlot[selcols]  
@@ -187,24 +232,33 @@ def readTaxlots(year):
             path = txpath + f'\\Taxlots{year}\\{lyr}'
             txt = 'taxlot|Taxlot'
             files = os.listdir(path)
-            filelst = list(filter(lambda x: re.search(txt, x, re.IGNORECASE), files))
+            filelst = list(
+                filter(lambda x: re.search(txt, x, re.IGNORECASE), files))
             filesel = [file for file in filelst if 'Taxlots' not in file]
             file = filesel[0].split('.')[0]
             txlot = readGeoData(path+f'\\{file}.shp')
             if all([col in txlot.columns for col in listcols]):
                 txlot = txlot[listcols]
-            elif all([col in list(map(lambda x: x.capitalize(), txlot.columns)) for col in selcols]):
-                txlot.columns = list(map(lambda x: x.capitalize(), txlot.columns))
+            elif all(
+                    [col in list(map(lambda x: x.capitalize(), txlot.columns))
+                     for col in selcols]):
+                txlot.columns = list(
+                    map(lambda x: x.capitalize(), txlot.columns))
                 txlot = txlot[selcols]  
                 txlot.columns = listcols
             else:
-                print(f"check the column names of the {year} taxlots in {lyr}!")
+                print(
+                    f'check the column names of the {year} taxlots in {lyr}!')
             frames.append(txlot)        
     else:
-        print("check the year!")
+        print('check the year!')
     gdf = pd.concat(frames, ignore_index=True)
     gdf.loc[:, 'Year'] = year
     return gdf
+
+
+def readTaxlots = read_taxlots
+
 
 def readMapIndex(year):
     colnms = ['County', 'ORMapNum', 'geometry']
