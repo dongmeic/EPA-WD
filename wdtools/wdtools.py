@@ -1,7 +1,5 @@
 import collections
 from collections import Counter
-import datetime
-from datetime import date
 import difflib
 import io
 from itertools import chain
@@ -15,11 +13,9 @@ import string
 import time
 import warnings
 import webbrowser
-import zipfile
 
 import fiona
 import geopandas as gpd
-import geopy
 from geopy.geocoders import Nominatim
 import googlemaps
 import numpy as np
@@ -31,7 +27,6 @@ import requests
 from shapely.geometry import shape
 from shapely.validation import make_valid
 from shapely.errors import ShapelyDeprecationWarning
-from urllib.request import urlopen
 from win32com.client import Dispatch
 
 
