@@ -518,6 +518,17 @@ def get_all_wd(num, raw=False):
     wd_df = pd.concat(frames, ignore_index=True)
     return wd_df
 
+def get_added_SA():
+    path = inpath + "\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb"
+    lyrs = [lyr for lyr in fiona.listlayers(path)]
+    frames = []
+    for lyr in lyrs:
+        sa = gpd.read_file(path, layer=lyr)
+        sa = sa.to_crs(epsg=2992)
+        frames.append(sa)
+    sadf = pd.concat(frames, ignore_index=True)
+    return sadf
+
 def get_all_SA(num):
     """
     combine all the SA polygons into one dataframe
@@ -535,12 +546,7 @@ def get_all_SA(num):
         frames.append(sa_dt)
     sa_df = pd.concat(frames, ignore_index=True)
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
-    path = inpath + "\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb"
-    WD2021_0179 = gpd.read_file(path, layer="WD2021_0179")
-    WD2021_0179 = WD2021_0179.to_crs(epsg=2992)
-    WD2017_0229 = gpd.read_file(path, layer="WD2017_0229")
-    WD2017_0229 = WD2017_0229.to_crs(epsg=2992)
-    added = pd.concat([WD2021_0179, WD2017_0229], ignore_index=True)
+    added = get_added_SA()
     sa_gdf = pd.concat([sa_gdf[['wdID', 'code', 'geometry']], 
                    added[['wdID', 'code', 'geometry']]], 
                    ignore_index=True)
@@ -691,7 +697,7 @@ def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False
             break
         time.sleep(1)
     if toadd != []:
-        return toadd
+        return toadd, wdID
 
 def check_unmatched_r1(wdID, df):
     """
@@ -699,7 +705,7 @@ def check_unmatched_r1(wdID, df):
     df is from the splited unmatched records from r1 process
     """
     url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
-    selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes', 'missinglot']
+    selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes', 'missinglot', "status_name", "is_batch_file"]
     if str(url) == 'nan':
         print('Decision link is not available')
     else:
