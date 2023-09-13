@@ -25,8 +25,9 @@ class TaxlotReader:
             lyrsel = [
                 x for x in lyrlist
                 if x not in list(
-                        filter(lambda x: re.search(r'_prop_tbl|_TaxCode', x), lyrlist))
-            ]
+                    filter(
+                        lambda x: re.search(r'_prop_tbl|_TaxCode', x),
+                        lyrlist))]
             if year != 2011:
                 lyrsel = [lyr for lyr in lyrsel if lyr in cntlst]
             else:
@@ -37,7 +38,8 @@ class TaxlotReader:
             for lyr in sorted(lyrsel):
                 print(lyr)
                 txlot = gpd.read_file(gdb, layer=lyr)
-                lst = list(map(lambda x: re.sub(r'[0-9]', '', x), txlot.columns))
+                lst = list(
+                    map(lambda x: re.sub(r'[0-9]', '', x), txlot.columns))
                 colnms = list(map(lambda x: removeCountyNm(x, toRemove), lst))
                 txlot.columns = colnms
                 if year != 2011:
@@ -45,14 +47,19 @@ class TaxlotReader:
                         'taxlot__|taxlot_|Taxlots_|TAXLOT_|Taxlot_|taxlots_|'
                         'TaxLot_')
                     colsel = list(
-                        filter(lambda x: re.search(txt, x, re.IGNORECASE), colnms))
+                        filter(
+                            lambda x: re.search(txt, x, re.IGNORECASE), colnms)
+                    )
                     colsel = unique(
-                        [col for col in colsel if col not in [
-                            'Taxlots_F', 'Taxlots_Map_Taxlo', 'Taxlots_Accnum']])
+                        [col for col in colsel if col not in
+                         ['Taxlots_F', 'Taxlots_Map_Taxlo', 'Taxlots_Accnum']])
                     ncolnms = list(
-                        map(lambda x: re.sub(txt, '', x, re.IGNORECASE), colsel))
+                        map(
+                            lambda x: re.sub(txt, '', x, re.IGNORECASE),
+                            colsel))
                     txlot = txlot[colsel]
-                    txlot.columns = list(map(lambda x: x.capitalize(), ncolnms))
+                    txlot.columns = list(
+                        map(lambda x: x.capitalize(), ncolnms))
                 else:
                     if all(
                             [colnm in colnms
@@ -60,7 +67,7 @@ class TaxlotReader:
                         colsel = [
                             col for col in colnms
                             if col not in (
-                                    check_duplicates(colnms)[0] + ['Maptaxlot'])]
+                                check_duplicates(colnms)[0] + ['Maptaxlot'])]
                     else:
                         colsel = [
                             col for col in colnms
@@ -86,7 +93,8 @@ class TaxlotReader:
                 if all([col in txlot.columns for col in listcols]):
                     txlot = txlot[listcols]
                 elif all(
-                        [col in list(map(lambda x: x.capitalize(), txlot.columns))
+                        [col in list(
+                            map(lambda x: x.capitalize(), txlot.columns))
                          for col in selcols]):
                     txlot.columns = list(
                         map(lambda x: x.capitalize(), txlot.columns))
@@ -94,7 +102,8 @@ class TaxlotReader:
                     txlot.columns = listcols
                 else:
                     print(
-                        f'check the column names of the {year} taxlots in {lyr}!')
+                        f'check the column names of the {year} taxlots in '
+                        f'{lyr}!')
                 frames.append(txlot)        
         else:
             print('check the year!')
