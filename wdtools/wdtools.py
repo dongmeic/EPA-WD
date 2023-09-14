@@ -30,14 +30,21 @@ from shapely.validation import make_valid
 from shapely.errors import ShapelyDeprecationWarning
 from win32com.client import Dispatch
 
-from taxlots import TaxlotReader
-from utils import read_geo_data, remove_duplicates
+from taxlots import MapIndexReader, TaxlotReader
+from utils import remove_duplicates
 
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 
 INPATH = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
 TAXLOT_PATH = f'{INPATH}\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years'
+# create a spreadsheet to create a dictionary for the match between county name
+# and code
+COUNTY_IDS = pd.read_excel(fr'{INPATH}\notes\CNT_Code.xlsx')
+# create a dictionary to look up county code
+COUNTY_DICT = dict(zip(COUNTY_IDS.COUNTY, COUNTY_IDS.ID))
+OR_COUNTIES = list(COUNTY_DICT.keys())
+
 
 # Clean up for now; will deal with placement later...
 google_key = json.load(open('config/keys.json'))['google_maps']['APIKEY']
@@ -47,17 +54,11 @@ yearstart = 2016
 yearend = 2023
 #outfolder = 'test'
 outfolder = 'output\\matched'
-# create a spreadsheet to create a dictionary for the match between county name
-# and code
-cnt_ID = pd.read_excel(f'{INPATH}\\notes\\CNT_Code.xlsx')
-# create a dictionary to look up county code
-cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(
     zip(
         list(range(0, 6)),
         ['township number', 'township direction', 'range number',
          'range direction', 'section number', 'QQ']))
-OR_counties = list(cnt_dict.keys())
 nm2add = [0, 1420, 2143, 2878, 3932, 4370]
 selectedvars = [
     'wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
@@ -125,45 +126,12 @@ readTaxlots = read_taxlots
 
 
 # TODO: continue here--refactor
-def readMapIndex(year):
-    colnms = ['County', 'ORMapNum', 'geometry']
-    if year == 2012:
-        frames = []
-        dir_list = os.listdir(TAXLOT_PATH + f'\\Taxlots{year}')
-        for lyr in dir_list:
-            #print(lyr)
-            path = TAXLOT_PATH + f'\\Taxlots{year}\\{lyr}'
-            files = os.listdir(path)
-            filelst = list(filter(lambda x: re.search('mapindex|MIndex', x, re.IGNORECASE), files))
-            file = filelst[0].split('.')[0]
-            layer_file = path+f'\\{file}.shp'
-            gdf = read_geo_data(layer_file)
-            if all([col in gdf.columns for col in colnms]):
-                gdf = gdf[colnms]
-            else:
-                gdf.columns = list(map(lambda x: x.capitalize(), gdf.columns))
-                if all([col in gdf.columns for col in ['County', 'Ormapnum', 'Geometry']]):
-                    gdf.rename(columns={'Ormapnum': 'ORMapNum', 'Geometry': 'geometry'}, inplace=True)
-                    gdf = gdf[colnms]
-                elif 'County' not in gdf.columns:
-                    gdf.loc[:, 'County'] = int(cnt_dict[lyr])
-                    if 'First_orma' in gdf.columns:
-                        gdf.rename(columns={'First_orma': 'ORMapNum', 'Geometry': 'geometry'}, inplace=True)
-                    else:
-                        gdf.rename(columns={'Ormapnum': 'ORMapNum', 'Geometry': 'geometry'}, inplace=True)
-                    gdf = gdf[colnms]
-                else:
-                    print(f"check the column names of the {year} taxmap in {lyr}!")
-            frames.append(gdf)
-        gdf = pd.concat(frames, ignore_index=True)
-    elif year == 2011:
-        gdb = TAXLOT_PATH+f'\\Taxlots{year}.gdb'
-        gdf = gpd.read_file(gdb, layer='mapIndex')
-        gdf = gdf[colnms]
-    else:
-        print("check the year!")
-    gdf.loc[:, 'Year'] = year
-    return gdf
+def read_map_index(year):
+    return MapIndexReader(TAXLOT_PATH, COUNTY_DICT).read(year)
+
+
+ReadMapIndex = read_map_index
+
 
 ################################################ Deliverable ####################################################
 
@@ -337,7 +305,7 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
     if (len(cnts) > 1) and (review==False):
         print(f"{wdID} crosses counties!")
         return None
-    elif cnts.any() not in OR_counties:
+    elif cnts.any() not in OR_COUNTIES:
         print(f"Check the county name {cnts[0]}!")
         return None
     else:
@@ -420,7 +388,7 @@ def create_ORMapNm(ct_nm, trsqq):
     """
     return ORMap number based on county name and trsqq
     """
-    part1 = str(int(cnt_dict[ct_nm])).zfill(2) + convert_trsqq(trsqq)
+    part1 = str(int(COUNTY_DICT[ct_nm])).zfill(2) + convert_trsqq(trsqq)
     mpidx = part1 + '--0000'
     if mpidx not in all_mpidx:
         if part1 in tid_dst_0:
@@ -944,7 +912,7 @@ def get_county_code_from_lonlat(lon, lat, search="OR"):
     else:
         pnt = get_point_from_lonlat(lon, lat, transprj=False, export=False)
         cnty = extract_county_name(pnt, cnts)
-    res = str(cnt_dict[cnty]).zfill(2)
+    res = str(COUNTY_DICT[cnty]).zfill(2)
     return res
 
 def separate_numbers_letters(x):
@@ -1116,7 +1084,7 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
         if trsqq_to_compare_c == trsqq_to_check_c:
             print("trsqq matched, checking county code...")
             cnty_code = int(get_county_code_from_lonlat(lon, lat))
-            county_to_compare = [key for key, value in cnt_dict.items() if value == cnty_code][0]
+            county_to_compare = [key for key, value in COUNTY_DICT.items() if value == cnty_code][0]
             # need to check the typos in the county name first
             if county_to_check == county_to_compare:
                 print("county code is corrected, need to check lot numbers...")
@@ -1221,7 +1189,7 @@ def review_unmatched_df_r2(df, taxlot, setID, ml, export=True):
     ml (missing lot): whether the unmatched records are missing parcel id in digit
     """
     # exclude the unusual county records, e.g., Yamhill and Washington
-    df = df[df.county.isin(OR_counties)]
+    df = df[df.county.isin(OR_COUNTIES)]
     outdf = df.copy()[['wetdet_delin_number', 'trsqq', 'parcel_id', 'county', 'latitude', 'longitude', 'DecisionLink', 'record_ID', 'IDyear']]
     outdf.loc[:,'correct_type'], outdf.loc[:,'correction'] = zip(*outdf.apply(lambda row: review_wd_record_w_coord(wd_id = row.wetdet_delin_number, 
                                                                         county_to_check = row.county, 
@@ -1804,7 +1772,7 @@ def reindex_data(wd_dt):
     ndf.loc[:, 'lot'] = list(chain.from_iterable(wd_dt.lots.values.tolist()))
     ndf.loc[:, 'lots'] = ndf['lots'].apply(lambda x: ', '.join(dict.fromkeys(x).keys()))
     # get county code
-    ndf.loc[:, 'cnt_code'] = ndf.county.map(cnt_dict)
+    ndf.loc[:, 'cnt_code'] = ndf.county.map(COUNTY_DICT)
     # get OR taxlot IDs for wd data
     ndf = ndf[~ndf.cnt_code.isnull()]
     ndf.loc[:, 'ORTaxlot'] = ndf[['cnt_code', 'trsqq', 'lot']].apply(lambda row: create_ORTaxlot(cnt_code=row.cnt_code, trsqq=row.trsqq, lot=row.lot), axis = 1)
@@ -1838,7 +1806,7 @@ def clean_wd_table(setID, file):
     selectedID = wd_dt.parcel_id.astype(str) != 'nan'
     wd_dt.loc[selectedID, 'notes'] = wd_dt.copy()[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
     wd_dt['county'] = wd_dt['county'].apply(lambda x: x.title())
-    wd_dt = wd_dt[wd_dt.county.isin(OR_counties)]
+    wd_dt = wd_dt[wd_dt.county.isin(OR_COUNTIES)]
     if wd_dt.empty:
         res = wd_dt
     else:
@@ -1851,7 +1819,7 @@ def clean_wd_table(setID, file):
         ndf['response_date'] = ndf['response_date'].dt.strftime("%Y-%m-%d")
         ndf['received_date'] = ndf['received_date'].dt.strftime("%Y-%m-%d")
         ndf['county'] = ndf['county'].apply(lambda x: x.title())
-        ndf = ndf[ndf.county.isin(OR_counties)]
+        ndf = ndf[ndf.county.isin(OR_COUNTIES)]
         end = time.time()
         res = ndf
         #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')

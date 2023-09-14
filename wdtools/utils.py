@@ -6,6 +6,11 @@ import pandas as pd
 from shapely.geometry import shape
 
 
+def all_a_in_b(a, b):
+    'Determine if all items in iterable a are in iterable b'
+    return set(a) - set(b) == set()
+
+
 def read_geo_data(layer_file):
     '''Read geodata with a geometry check
     Args:
