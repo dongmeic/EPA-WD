@@ -309,8 +309,6 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
         print(f"Check the county name {cnts[0]}!")
         return None
     else:
-        setID = ndf.SetID.values[0]
-        #print(f"{wdID} is in County {cnts[0]} in Set {setID}...")
         if 'ORMapNum' not in ndf.columns:
             ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
         trsqq_list, n = check_duplicates(ndf.trsqq.values)
@@ -527,7 +525,6 @@ def reformat(file):
     """
     reformat Excel
     """    
-    dat = pd.read_excel(file)
     wb = openpyxl.load_workbook(file)
     ws = wb.active
     ws = removeFormatting(ws)
@@ -816,12 +813,6 @@ def run_Tier3_4_final(setID, nm_to_add):
     gdf: the final shapefile that combined both automatic matches and digitized records
     """
     start = time.time()
-    revpath = f'{INPATH}\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
-    wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
-    matched = gpd.read_file(
-        f'{INPATH}\\output\matched\matched_records_{setID}_edited.shp')
-    mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
-    partial = gpd.read_file(revpath, layer=f'{setID}_partial')
     with open(outpath+f'\\matched\\{setID}_edited.txt') as f:
         edited = f.readlines()
     file = outpath+f"\\matched\\{setID}_edited_1.txt"
@@ -1460,16 +1451,12 @@ def run_Tier2_step1(setID, unmatched_df, all_taxlot):
     split unmatched records
     """
     r1_df, r2_df = split_unmatched_df(unmatched_df, ml='N', setID=setID)
-    rev_r2 = review_unmatched_df_r2(r2_df, all_taxlot, setID, ml='N', export=True)
-    taxlots_to_review = get_taxlot_to_check_r2(rev_r2, all_taxlot, setID, ml='N')
     return r1_df, r2_df
 
 def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
     """
     update the match
     """
-    cor_r1 = correct_unmatched(r1_df, setID, s='r1', ml='N', export=True)
-    cor_r2 = correct_unmatched(r2_df, setID, s='r2', ml='N', export=True)
     df = combine_corrected_unmatched(setID, ml='N')
     rev_df = reindex_data(df)
     matched = match_wd_data_with_taxlot(rev_df, setID, all_taxlot, export=True, update=True)
@@ -1489,11 +1476,6 @@ def report2DSL(setID):
     """
     generate the correction report for DSL
     """
-    r2_0 = pd.read_csv(
-        os.path.join(
-            INPATH,
-            '\\output\\to_review\\',
-            f'review_unmatched_{setID}_r2_N_0.csv'))
     r1_notes = pd.read_csv(
         os.path.join(
             INPATH,
@@ -1800,7 +1782,6 @@ def clean_wd_table(setID, file):
     """
     function to clean up wd data by single file
     """
-    start = time.time()
     wd_dt = read_wd_table(setID, file)
     # this will help identify problematic records with numbers
     selectedID = wd_dt.parcel_id.astype(str) != 'nan'
@@ -1820,7 +1801,6 @@ def clean_wd_table(setID, file):
         ndf['received_date'] = ndf['received_date'].dt.strftime("%Y-%m-%d")
         ndf['county'] = ndf['county'].apply(lambda x: x.title())
         ndf = ndf[ndf.county.isin(OR_COUNTIES)]
-        end = time.time()
         res = ndf
         #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return res
@@ -2072,7 +2052,6 @@ def compare_data_report(gdf, setID, nm_to_add, export = False):
     matched_rID = gdf.record_ID.unique()
     # missed IDs in the existing data that is not nan
     missed_gdf = setgdf[setgdf.Record_ID.astype(str) != 'nan'][~setgdf.Record_ID.isin(matched_rID)]
-    missedID = missed_gdf.Record_ID.unique()
     # matched IDs in the existing data that is not nan
     matched_gdf = setgdf[(setgdf.Record_ID.astype(str) != 'nan') & (setgdf.Record_ID.isin(matched_rID))]
     matchedID = matched_gdf.Record_ID.unique()
@@ -2235,7 +2214,6 @@ def taxlot2trsqq(x):
     """ 
     #print(x)
     rcs = ['.25', '.50', '.75'] # rcs = ratio codes
-    ptns = '.25|.50|.75'
     if any([c in x for c in rcs]):
         if (x[4:7] in rcs) and (x[10:13] in rcs):
             if x[4:7] == x[10:13]:
