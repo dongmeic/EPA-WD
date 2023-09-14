@@ -119,12 +119,6 @@ class TaxlotReader:
         - x (list[str]): the input list
         - to_remove (list[str]): list of strings to remove from <x>
         '''
-        # Very confusing
-        #tf = [tr in x for tr in to_remove]
-        #tr = [tr for tr in to_remove if tr in x]
-        #if any(tf):
-        #    x = re.sub(tr[0], '', x)
-        #return x
         x = set(x) - set(to_remove)
         return list(x)
 
