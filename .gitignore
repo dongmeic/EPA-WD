@@ -1,4 +1,16 @@
+# Backups
+#--------
+.*~
+*~
+
+
+# Python/Jupyter
+#--------------
 *.pyc
 __pycache__/
-config/
 .ipynb_checkpoints/
+
+
+# Dirs
+#-----
+config/
