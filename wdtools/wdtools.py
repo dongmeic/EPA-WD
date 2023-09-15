@@ -1,14 +1,11 @@
 # TODO: replace paths with pathlib.Path
-import collections
 from collections import Counter
 import difflib
 import io
-from itertools import chain
 import json
 import os
 from os import walk
 import pickle
-from random import sample
 import re
 import string
 import time
@@ -23,33 +20,27 @@ import numpy as np
 import openpyxl
 import pandas as pd
 from PyPDF2 import PdfReader, PdfWriter
-from pyproj import Transformer
 import requests
 #from shapely.geometry import shape
 from shapely.validation import make_valid
 from shapely.errors import ShapelyDeprecationWarning
 from win32com.client import Dispatch
 
+from const import (
+    ALL_TXID, COL_DICT, COUNTY_DICT, INPATH, OR_COUNTIES, OUTPATH, TAXLOT_PATH,
+    TRANSFORMER, TRSQQ, TRSQQ_DICT, TSQ_DST, TTDF, VAR_LIST, WD_PATH)
+from deliverables import SASplitter
 from taxlots import MapIndexReader, TaxlotReader
-from utils import remove_duplicates
+from utils import (
+    check_duplicates, create_ORMap_name, get_lot_numbers, reindex_data,
+    remove_duplicates, split_WD_to_taxmaps)
 
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 
-INPATH = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping'
-TAXLOT_PATH = f'{INPATH}\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years'
-# create a spreadsheet to create a dictionary for the match between county name
-# and code
-COUNTY_IDS = pd.read_excel(fr'{INPATH}\notes\CNT_Code.xlsx')
-# create a dictionary to look up county code
-COUNTY_DICT = dict(zip(COUNTY_IDS.COUNTY, COUNTY_IDS.ID))
-OR_COUNTIES = list(COUNTY_DICT.keys())
-
 
 # Clean up for now; will deal with placement later...
 google_key = json.load(open('config/keys.json'))['google_maps']['APIKEY']
-outpath = f'{INPATH}\\output'
-wdpath = f'{INPATH}\\DSL data originals'
 yearstart = 2016
 yearend = 2023
 #outfolder = 'test'
@@ -60,27 +51,7 @@ trsqq_correction_dict = dict(
         ['township number', 'township direction', 'range number',
          'range direction', 'section number', 'QQ']))
 nm2add = [0, 1420, 2143, 2878, 3932, 4370]
-selectedvars = [
-    'wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
-    'city', 'county', 'site_name', 'site_desc','latitude',
-    'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
-    'status_name', 'received_date', 'response_date','reissuance_response_date',
-    'project_id', 'site_id', 'SetID','record_ID', 'ORMapNum']
-varlist = selectedvars + ['geometry', 'code']
-transformer = Transformer.from_crs("EPSG:2992", "EPSG:4326")
-coldict = {
-    'wetdet_delin_number': 'wdID', 
-    'address_location_desc':'loc_desc', 
-    'Coord-Source':'CordSource',
-    'DocumentName':'doc_name',
-    'DecisionLink':'doc_link',
-    'is_batch_file':'isbatfile',
-    'status_name': 'status_nm',
-    'received_date':'receiveddt', 
-    'response_date':'responsedt',
-    'reissuance_response_date':'reissuance'}
 issuepath = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\issueIDs.gdb'
-
 
 def read_trsqq():
     'Read trsqq list, dictionary, and dataframe'    
@@ -92,53 +63,30 @@ def read_trsqq():
     return trsqq, trsqq_dict, df
 
 # More to deal with later...
-trsqq, trsqq_dict, ttdf = read_trsqq()
-tid_dst = [
-    tid for tid in ttdf.ORTaxlot.unique()
-    if any(substring in tid for substring in ['--D', '--S', '--T'])]
-tid_dst_0 = list(map(lambda x: re.split("--", x)[0], tid_dst))
-tid_dst_1 = list(map(lambda x: re.split("--", x)[1], tid_dst))
-tsq_dst = ttdf[ttdf.ORTaxlot.isin(tid_dst)].trsqq.unique()
 cnts = gpd.read_file(f'{INPATH}\\GIS\\Oregon_Counties.shp')
 pdf_outpath = r'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\pdf'
-
-with open(os.path.join(INPATH, 'ORTaxlot.pkl'), 'rb') as f:
-    all_txid = pickle.load(f)
-
-with open(os.path.join(INPATH, 'ORMapIndex.pkl'), 'rb') as f:
-    all_mpidx = pickle.load(f)
 
 with open(os.path.join(INPATH, 'ParticipCnt.pkl'), 'rb') as f:
     county_list = pickle.load(f)
 
 
-# Bad idea to use this globally... this warning exists for a reason; better
-# to deactivate only where you are certain it is not an issue
-#pd.options.mode.chained_assignment = None
-
-
-# Taxlot Review ###################################################
+# Taxlot Review -----------------------------------------------------------
 def read_taxlots(year):
-    return TaxlotReader(TAXLOT_PATH, county_list).read(year)
+    return TaxlotReader(county_list).read(year)
+
+readTaxlots = read_taxlots  # for backwards compatibility
 
 
-readTaxlots = read_taxlots
-
-
-# TODO: continue here--refactor
 def read_map_index(year):
-    return MapIndexReader(TAXLOT_PATH, COUNTY_DICT).read(year)
-
+    return MapIndexReader().read(year)
 
 ReadMapIndex = read_map_index
 
 
-################################################ Deliverable ####################################################
-
+# TODO: continue here--refactor
+# Deliverable -------------------------------------------------------------
 def format_gdf_provided(gdf, wdID):
-    """
-    format gdf provided to be in the same format with mapped records
-    """      
+    'Format gdf provided to be in the same format as mapped records'
     gdf['wdID'] = wdID
     gdf = gdf.dissolve('wdID')
     gdf['wdID'] = gdf.index
@@ -152,99 +100,51 @@ def format_gdf_provided(gdf, wdID):
     gdf = gdf[['wdID', 'code', 'Shape_Length', 'Shape_Area', 'geometry']]
     return gdf
 
+
 def get_corrected_wd_df(num, setID=False):
-    """
-    combine all the corrected DSL tables into one dataframe
-    """  
-    frames = []
+    'Combine all the corrected DSL tables into one dataframe'
     if setID:
-        wd_df = pd.read_csv(wdpath+f'\\Corrected_by_Set\\Set{num}_2017-20220601.csv')
+        wd_df = pd.read_csv(
+            fr'{WD_PATH}\Corrected_by_Set\Set{num}_2017-20220601.csv')
     else:
+        frames = []
         for i in range(num):
-            wd_dt = pd.read_csv(wdpath+f'\\Corrected_by_Set\\Set{i+1}_2017-20220601.csv')
+            wd_dt = pd.read_csv(
+                fr'{WD_PATH}\Corrected_by_Set\Set{i + 1}_2017-20220601.csv')
             frames.append(wd_dt)
         wd_df = pd.concat(frames, ignore_index=True)
     return wd_df
 
-def export_wd_gdf_by_record(gdf, outnm):
-    """
-    export geodataframe with the original wd data
-    """      
-    gdf = gdf[varlist]
-    gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
-    gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
-    gdf['lat'], gdf['lon'] = transformer.transform(gdf.centroid.x, gdf.centroid.y)
-    gdf = gdf.rename(columns=coldict)
+
+def export_wd_gdf_by_record(gdf, out_name):
+    'Export geodataframe with the original wd data'
+    gdf = gdf[VAR_LIST]
+    gdf['received_date'] = gdf['received_date'].dt.date
+    gdf['response_date'] = gdf['response_date'].dt.date
+    gdf['lat'], gdf['lon'] = TRANSFORMER.transform(
+        gdf.centroid.x, gdf.centroid.y)
+    gdf = gdf.rename(columns=COL_DICT)
     try:
-        gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
+        gdf.to_file(fr'{OUTPATH}\test\{out_name}.shp')
     except RuntimeError:
         gdf['geometry'] = gdf.geometry.buffer(0)
-    gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
-    return gdf
-        
-def split_SA_by_rid_in_df(wd_df, sa_gdf_all, all_mapIdx, all_taxlot, em_wids, export=False, outnm='example_data', review=False):
-    """
-    split study area polygons where multiple record IDs exist;
-    rid is record ID;
-    em_wids is the example WD IDs;
-    wd_df is the dataframe that includes the example WD IDs;
-    sa_gdf_all is the geodataframe that includes the example WD IDs;
-    all_mapIdx is the combined geodataframe of map index from all years;
-    all_taxlot is the combined geodataframe of taxlots from all years;
-    return the combined geodataframe from split_WD_to_records
-    """
-    wd_df_s = wd_df[wd_df.wetdet_delin_number.isin(em_wids)]
-    wd_df_s['ORMapNum'] = wd_df_s[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
-    sa_gdf_s = sa_gdf_all[sa_gdf_all.wdID.isin(em_wids)]
-    wdID_list, n = check_duplicates(wd_df_s.wetdet_delin_number.values)
-    if n>0:
-        frames = []
-        for wid in wdID_list:
-            if wid in sa_gdf_s.wdID.values:
-                #print(wid)
-                ORmn = wd_df_s[wd_df_s.wetdet_delin_number==wid].ORMapNum.values
-                yr = wid[2:6]
-                mapIdx = all_mapIdx[(all_mapIdx.ORMapNum.isin(ORmn)) & (all_mapIdx.year==yr)]
-                taxlot = all_taxlot[all_taxlot.year==yr]
-                if review:
-                    out = split_WD_to_records(df=wd_df_s, gdf=sa_gdf_s, wdID=wid, mapindex=mapIdx, taxlots=taxlot, review=True)
-                else:
-                    out = split_WD_to_records(df=wd_df_s, gdf=sa_gdf_s, wdID=wid, mapindex=mapIdx, taxlots=taxlot)
-                frames.append(out)
-        df = pd.concat(frames, ignore_index=True)
-        gdf1 = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
-        wdID_sdf = wd_df_s[~wd_df_s.wetdet_delin_number.isin(wdID_list)]
-        wdIDList = wdID_sdf.wetdet_delin_number.values
-        sa_sgdf = sa_gdf_s[sa_gdf_s.wdID.isin(wdIDList)]
-        sa_sgdf.rename(columns={'wdID':'wetdet_delin_number'}, inplace=True)
-        gdf2 = wdID_sdf.merge(sa_sgdf[['code', 'wetdet_delin_number', 'geometry']], on='wetdet_delin_number')
-        gdf = pd.concat([gdf1[varlist], gdf2[varlist]])
-    else:
-        sa_gdf_s.rename(columns={'wdID':'wetdet_delin_number'}, inplace=True)
-        gdf = wd_df_s.merge(sa_gdf_s[['code', 'wetdet_delin_number', 'geometry']], on='wetdet_delin_number')
-        gdf = gdf[varlist]
-        gdf = gpd.GeoDataFrame(gdf, crs="EPSG:2992", geometry='geometry')
-    #gdf['received_date'] = gdf['received_date'].dt.strftime("%Y-%m-%d")
-    #gdf['response_date'] = gdf['response_date'].dt.strftime("%Y-%m-%d")
-    gdf['lat'], gdf['lon'] = transformer.transform(gdf.representative_point().x, gdf.representative_point().y)
-    if export:
-        gdf = gdf.rename(columns=coldict)
-        try:
-            gdf.to_file(f'{outpath}\\test\\{outnm}.shp')
-        except RuntimeError:
-            gdf['geometry'] = gdf.geometry.buffer(0)
-            gdf.to_file(f'{outpath}\\test\\{outnm}.shp')    
+    gdf.to_file(fr'{OUTPATH}\test\{out_name}.shp')
     return gdf
 
 
-def check_duplicates(v):
-    """
-    check duplicates in a list
-    """
-    itemlist = [item for item, count in collections.Counter(v).items() if count > 1]
-    return itemlist, len(itemlist)
+def split_sa_by_rid(
+        wd_df, sa_gdf_all, all_map_idx, all_taxlot, em_wids, export=False,
+        out_name='example_data', review=False):
+    return SASplitter(
+        VAR_LIST, COL_DICT, OUTPATH, wd_df, sa_gdf_all, all_map_idx,
+        all_taxlot, em_wids, export=False, out_name='example_data',
+        review=False).split_by_rd()
 
 
+split_SA_by_rid_in_df = split_sa_by_rid
+
+
+# FROM HERE....
 def read_all_mapIdx(exportID=False):
     """
     combine mapIndex from all years
@@ -261,6 +161,7 @@ def read_all_mapIdx(exportID=False):
             pickle.dump(list(gdf.ORMapNum.unique()), f) 
     return gdf
     
+
 def read_mapIdx(year):
     """
     read mapIndex from one year
@@ -291,110 +192,8 @@ def replace_geometry(gdf):
     gdf1 = df[df.record_ID.isin(selrids)].merge(sa_gdf,on='record_ID')
     gdf2 = pd.concat([gdf[~gdf.record_ID.isin(selrids)], gdf1], ignore_index=True)
     return gdf2
-    
-def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
-    """
-    this function splits the WD SA ploygons to ploygons by records
-    df is the dataframe that contains the selected WD ID and wetdet_delin_number in the columns
-    gdf is the geodataframe that contains the selected WD ID
-    mapindex is the taxmap geodataframe of the year
-    taxlots are the taxlots of the year
-    """
-    ndf = df[df.wetdet_delin_number==wdID]
-    cnts = ndf.county.unique()
-    if (len(cnts) > 1) and (review==False):
-        print(f"{wdID} crosses counties!")
-        return None
-    elif cnts.any() not in OR_COUNTIES:
-        print(f"Check the county name {cnts[0]}!")
-        return None
-    else:
-        if 'ORMapNum' not in ndf.columns:
-            ndf['ORMapNum'] = ndf[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
-        trsqq_list, n = check_duplicates(ndf.trsqq.values)
-        ngdf = split_WD_to_taxmaps(df=ndf, gdf=gdf, wdID=wdID, mapindex=mapindex)
-        if n > 0:
-            frames = []
-            for trsqq in trsqq_list:
-                inter = split_taxmap_to_records(df=ndf, gdf=ngdf, trsqq=trsqq, taxlots=taxlots)
-                frames.append(inter)
-            # idf is intersection data frame
-            idf = pd.concat(frames, ignore_index=True)
-            idf = idf[['geometry', 'record_ID']].merge(ndf[selectedvars],on='record_ID', how='left')
-            idf['code'] = ngdf.code.values[0]
-            # odf is the other dataframe that excludes intersection taxmaps
-            ogdf=ngdf[~ngdf.ORMapNum.isin(idf.ORMapNum)][['ORMapNum', 'geometry', 'code']]
-            odf=ndf[~ndf.ORMapNum.isin(idf.ORMapNum)][selectedvars]
-            odf=ogdf.merge(odf, on='ORMapNum', how='left')
-            out=pd.concat([idf[varlist], odf[varlist]])
-        else:
-            out=ndf.merge(ngdf[['ORMapNum', 'geometry', 'code']], on='ORMapNum', how='left')
-            out=out[varlist]
-        out = gpd.GeoDataFrame(out, geometry='geometry')
-        out = out.dissolve('record_ID')
-        out['record_ID'] = out.index
-        out.reset_index(drop=True, inplace=True)
-        return out
 
-def split_WD_to_taxmaps(df, gdf, wdID, mapindex):
-    """
-    this function splits the WD SA ploygons by taxmap
-    gdf is the geodataframe that contains the selected WD ID
-    mapindex is the taxmap geodataframe of the year
-    """
-    selmid = df[df.wetdet_delin_number==wdID].ORMapNum.unique()
-    gdf = gdf[gdf.wdID==wdID]
-    selmapindex = mapindex[['ORMapNum','geometry']][mapindex.ORMapNum.isin(selmid)]
-    try:
-        inter = gpd.overlay(gdf, selmapindex, 
-                    how='intersection', keep_geom_type=False)
-    except NotImplementedError:
-        gdf['geometry'] = gdf.geometry.buffer(0)
-        inter = gpd.overlay(gdf, selmapindex, 
-                    how='intersection', keep_geom_type=False)
-    inter = inter.dissolve('ORMapNum')
-    inter['ORMapNum'] = inter.index
-    inter.reset_index(drop=True, inplace=True)
-    return inter
 
-def split_taxmap_to_records(df, gdf, trsqq, taxlots):
-    """
-    this function is applied when the same taxmap has multiple records
-    df is the dataframe of the selected WD ID
-    gdf is the geodataframe of the selected taxmaps, inter from split_WD_to_taxmaps
-    trsqq is the selected trsqq that appears in multiple record IDs
-    taxlots are the taxlots of the year
-    """
-    df = df[df.trsqq==trsqq]
-    rdf = reindex_data(df)
-    taxlots = taxlots[taxlots.ORTaxlot.isin(rdf.ORTaxlot.unique())]
-    t_df = rdf[['ORTaxlot','record_ID']].merge(taxlots[['ORTaxlot', 'geometry']], 
-                                                     on='ORTaxlot', 
-                                                     how='left')
-    t_gdf = gpd.GeoDataFrame(t_df, geometry='geometry')
-    t_gdf = t_gdf.dissolve('record_ID')
-    t_gdf['record_ID'] = t_gdf.index
-    i_gdf = gdf[gdf.ORMapNum==df.ORMapNum.unique()[0]]
-    i_gdf = i_gdf.dissolve('wdID')
-    i_gdf['wdID'] = i_gdf.index
-    i_gdf.reset_index(drop=True, inplace=True)
-    inter = gpd.overlay(i_gdf, t_gdf, how='intersection', 
-                        keep_geom_type=False)
-    return inter
-    
-def create_ORMapNm(ct_nm, trsqq):
-    """
-    return ORMap number based on county name and trsqq
-    """
-    part1 = str(int(COUNTY_DICT[ct_nm])).zfill(2) + convert_trsqq(trsqq)
-    mpidx = part1 + '--0000'
-    if mpidx not in all_mpidx:
-        if part1 in tid_dst_0:
-            for mid in [part1+f'--{x}000' for x in ['D', 'S', 'T']]:
-                if mid in all_mpidx:
-                    mpidx = mid     
-    return mpidx
-    
 def get_all_wd(num, raw=False):
     """
     combine all the original DSL tables into one dataframe
@@ -428,8 +227,8 @@ def get_all_SA(num):
     """  
     frames = []
     for i in range(num):
-        file1 = outpath + f'\\final\\mapped_wd_Set00{i+1}.shp'
-        file2 = outpath + f'\\final\\Set00{i+1}_mapped_wd.shp'
+        file1 = OUTPATH + f'\\final\\mapped_wd_Set00{i+1}.shp'
+        file2 = OUTPATH + f'\\final\\Set00{i+1}_mapped_wd.shp'
         if os.path.exists(file2):
             sa_dt = gpd.read_file(file2)
         else:
@@ -452,7 +251,7 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=
     """
     frames = []
     wdlist = gdf.wdID.unique()
-    df['ORMapNum'] = df[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
+    df['ORMapNum'] = df[['county', 'trsqq']].apply(lambda row: create_ORMap_name(county=row.county, trsqq=row.trsqq), axis = 1)
     for wid in wdlist:
         #print(wid)
         df_s = df[df.wetdet_delin_number==wid]
@@ -461,7 +260,7 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=
         yr = wid[2:6]
         mapIdx = mapindex[(mapindex.ORMapNum.isin(ORmn)) & (mapindex.year==yr)]
         exp_gdf = split_WD_to_taxmaps(df=df_s, gdf=gdf_s, wdID=wid, mapindex=mapIdx)
-        exp_gdf['lat'], exp_gdf['lon'] = transformer.transform(exp_gdf.representative_point().x, exp_gdf.representative_point().y)
+        exp_gdf['lat'], exp_gdf['lon'] = TRANSFORMER.transform(exp_gdf.representative_point().x, exp_gdf.representative_point().y)
         ndf = df_s.drop_duplicates(subset='ORMapNum')
         ndf.drop(columns=['parcel_id','site_id','record_ID'], inplace=True)
         g = df_s.groupby('ORMapNum')
@@ -475,7 +274,7 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=
     sa_df = pd.concat(frames, ignore_index=True)
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
     if export:
-        sa_gdf=sa_gdf.rename(columns=coldict)
+        sa_gdf=sa_gdf.rename(columns=COL_DICT)
         try:
             sa_gdf.to_file(os.path.join(INPATH, "output", "final", f"{outnm}.shp"), index=False)
         except RuntimeError:
@@ -774,12 +573,12 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     issues = pd.read_csv(os.path.join(INPATH, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
     # exclude the ones that have issues
     issueIDs = list(issues.wetdet_delin_number.unique())
-    file = outpath+f"\\matched\\{setID}_reviewed.txt"
+    file = OUTPATH+f"\\matched\\{setID}_reviewed.txt"
     if os.path.exists(file):
         with open(file) as f:
             reviewedIDs = f.readlines()
         issueIDs = [iID for iID in issueIDs if iID not in reviewedIDs]
-    file = outpath+f"\\matched\\{setID}_not_mapped.txt"
+    file = OUTPATH+f"\\matched\\{setID}_not_mapped.txt"
     if os.path.exists(file):
         with open(file) as f:
             withdrawnIDs = f.readlines()
@@ -797,7 +596,7 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     unmatchedIDs = [wdID for wdID in wd.wetdet_delin_number.unique() if wdID not in final_gdf.wdID.unique()]
     toCheck = [ID for ID in unmatchedIDs if ID not in issueIDs]
     digitized_nIDs = len(editedIDs) + len(dat.wdID.unique()) + len(wo_lot.wdID.unique())
-    file = outpath+f"\\matched\\{setID}_edited_1.txt"
+    file = OUTPATH+f"\\matched\\{setID}_edited_1.txt"
     if os.path.exists(file):
         with open(file) as f:
             editedIDs1 = f.readlines()
@@ -813,9 +612,9 @@ def run_Tier3_4_final(setID, nm_to_add):
     gdf: the final shapefile that combined both automatic matches and digitized records
     """
     start = time.time()
-    with open(outpath+f'\\matched\\{setID}_edited.txt') as f:
+    with open(OUTPATH+f'\\matched\\{setID}_edited.txt') as f:
         edited = f.readlines()
-    file = outpath+f"\\matched\\{setID}_edited_1.txt"
+    file = OUTPATH+f"\\matched\\{setID}_edited_1.txt"
     if os.path.exists(file):
         with open(file) as f:
             editedIDs1 = f.readlines()
@@ -1070,7 +869,7 @@ def review_wd_record_w_coord(wd_id, county_to_check, trsqq_to_check, parcel_IDs_
         lots_to_check = get_lot_numbers(parcel_IDs_to_check)
         trsqq_to_compare = taxlot2trsqq(tID)
         trsqq_to_compare_c = pad_string(trsqq_to_compare)
-        lots_to_compare = ttdf.loc[ttdf.trsqq==trsqq_to_compare, 'ORTaxlot'].values
+        lots_to_compare = TTDF.loc[TTDF.trsqq==trsqq_to_compare, 'ORTaxlot'].values
         lots_to_compare = list(map(get_lot_number_from_taxlot, lots_to_compare))
         if trsqq_to_compare_c == trsqq_to_check_c:
             print("trsqq matched, checking county code...")
@@ -1430,9 +1229,9 @@ def adjust_taxlot(tx, ty):
     adjust the taxlot with correct trsqq and taxlot with sheet number
     """
     res = ty
-    if tx in tsq_dst:
+    if tx in TSQ_DST:
         pattern = ty.split('--')[1][1:]
-        tid_list = ttdf[ttdf.trsqq == tx].ORTaxlot.unique()
+        tid_list = TTDF[TTDF.trsqq == tx].ORTaxlot.unique()
         for tid in tid_list:
             if re.search(pattern, tid):
                 res = tid
@@ -1463,7 +1262,7 @@ def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
     unmatched_df = report_unmatched(matched, setID, nm_to_add, mute = False)
     matched_toReview = matched[matched.notes.notnull()] 
     wd_toReview = wd[wd.wetdet_delin_number.isin(matched_toReview.wdID.unique())]
-    wd_toReview.to_csv(outpath + f'\\to_review\\partial_matched_{setID}.csv', index=False)
+    wd_toReview.to_csv(OUTPATH + f'\\to_review\\partial_matched_{setID}.csv', index=False)
     unmatched_df.to_csv(
         os.path.join(
             INPATH,
@@ -1487,11 +1286,11 @@ def report2DSL(setID):
             '\\output\\to_review\\',
             f'unmatched_df_{setID}_r2_N_notes.csv'))
     cordf = r1_notes.append(r2_notes, ignore_index=True)
-    matched = gpd.read_file(outpath + f'\\matched\\matched_records_{setID}.shp')
+    matched = gpd.read_file(OUTPATH + f'\\matched\\matched_records_{setID}.shp')
     corrected = matched[matched.record_ID.isin(cordf.record_ID.values)][['wdID','trsqq', 'parcel_id', 'record_ID']].drop_duplicates(ignore_index=True)
     report = cordf.merge(corrected[['trsqq', 'parcel_id', 'record_ID']], on='record_ID')
     report['trsqq'] = report.trsqq.apply(lambda x: x.rstrip('0'))
-    report.to_csv(outpath + f'\\corrected\\corrected_{setID}.csv', index=False)
+    report.to_csv(OUTPATH + f'\\corrected\\corrected_{setID}.csv', index=False)
     return report
     
 ################################################ Tier 1 #####################################################
@@ -1515,70 +1314,12 @@ def list_files(path, folder=False):
 #    x = np.array(list1)
 #    return list(np.unique(x))
 
-def get_lot_numbers(x):
-    """
-    This function takes a string or integer and returns a list of lot numbers
-    function to get all the lot numbers
-    x is parcel_id
-    """
-    #print(x)
-    if x is None:
-        res = None
-    elif type(x) is int:
-        s = str(x)
-        if len(str(x)) > 5:
-            idx = [i for i, char in enumerate(s) if char != '0']
-            lot_list = []
-            for i in range(len(idx)-1):
-                lot_list.append(s[idx[i]:idx[i+1]])
-            lot_list.append(s[idx[len(idx)-1]:])
-            res = lot_list
-        else:
-            res = [s]
-    else:
-        # remove parenthesis from text
-        if '(' in str(x):
-            txt = x.replace('(','').replace(')','')
-        else:
-            txt = str(x)
-        # split the text
-        lot_list = []
-        for r in re.split(",|, | ", txt):
-            if '-' in r:
-                start, end = r.split('-')
-                if start.isdigit() and end.isdigit():
-                    lot_list += list(range(int(start), int(end)+1))
-                    lot_list = list(map(lambda x: str(x), lot_list))
-            else:
-                lot_list.append(r)
-        # remove text elements
-        l = []
-        # in case there are still number-letter strings (e.g., '1a')
-        for t in [lot for lot in lot_list if ~lot.isnumeric()]:
-            if any(c.isdigit() for c in t):
-                l.append(re.sub('\D', '', t))
-        res = remove_duplicates([lot for lot in lot_list if lot.isnumeric()] + l)
-        r = re.search('ROW|RR', x, re.IGNORECASE)
-        w = re.search('Water', x, re.IGNORECASE)
-        l = re.search('RAIL', x, re.IGNORECASE)
-        for srch, msg in zip([r, w, l], ['ROADS','WATER','RAILS']):
-            if srch:
-                #res += msg
-                res.append(msg)
-    return res
-
-#def check_duplicates(v):
-#    """
-#    check duplicates in a list
-#    """
-#    itemlist = [item for item, count in collections.Counter(v).items() if count > 1]
-#    return itemlist, len(itemlist)
 
 def read_wd_table(setID, file):
     """
     read wd tables, recordID is used for single tables
     """
-    datafile = os.path.join(wdpath, setID, file)
+    datafile = os.path.join(WD_PATH, setID, file)
     xl = pd.ExcelFile(datafile)
     wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
     wd_dt.loc[:, 'county'] = wd_dt.county.apply(lambda x: x.capitalize())
@@ -1607,159 +1348,6 @@ def scan_trsqq(x):
         res=0
         return res
     
-def get_tr_code(x, code='t'):
-    """
-    get township or range code from the taxlot
-    """
-    nms = re.findall('\d+', x)
-    if code=='t':
-        nm1 = nms[0][0:2]
-    else:
-        nm1 = nms[1][0:2]
-    lts = re.findall("[a-zA-Z]+", x)
-    if code=='t':
-        lts2 = lts[0]
-    else:
-        dirlst = ["E", "W", "S", "N"]
-        if lts[1] in dirlst:
-            lts2 = lts[1]
-        else:
-            lts2 = sample(dirlst, 1)[0]
-    
-    if len(nm1) == 1:
-        tr1 = '0' + nm1
-    elif len(nm1) == 3:
-        tr1 = nm1[1:3]
-    else:
-        tr1 = nm1
-    
-    if ('V' in lts2) or ('Y' in lts2):
-        tr2 = '.50'
-        tr3 = lts2[1]
-    elif('X' in lts2) or ('Z' in lts2):
-        if any([x in lts2 for x in ['XS', 'ZN', 'XE', 'ZW']]):
-            tr2 = '.75'
-        else:
-            tr2 = '.25'
-    else:
-        tr2 = '.00'
-        tr3 = lts2
-
-    res = tr1 + tr2 + tr3
-    return res
-   
-def get_s_code(x):
-    """
-    get section code from trsqq code
-    """
-    if len(x) <= 7:
-        s = '00'
-    else:
-        nms = re.findall('\d+', x)
-        n = len(nms)
-        k = len(nms[1])
-        if(n < 3) & (k > 2):
-            nm1 = nms[1][(k-2):(k+1)]
-        else:
-            nm1 = nms[2]
-        if len(nm1) == 1:
-            s = '0' + nm1
-        else:
-            s = nm1
-    return s       
-
-def get_qq_code(x):
-    """
-    get QQ code from trsqq code
-    """
-    dirlst = ["E", "W", "S", "N"]
-    nms = re.findall('\d+', x)
-    lts = re.findall("[a-zA-Z]+", x)
-    if (len(lts) == 2) & (lts[1] not in dirlst):
-        if len(lts[1]) == 2:
-            qq = lts[1]
-        else:
-            qq = lts[1] + '0'
-    elif len(nms[2]) > 2:
-        if nms[2] == 4:
-            qq = nms[2][2:4]
-        else:
-            qq = nms[2][2] + '0'
-    elif len(lts) == 3:
-        if len(lts[2]) == 2:
-            qq = lts[2]
-        else:
-            qq = lts[2] + '0'
-    else:
-        if len(nms[0]) == 1:
-            t = '0' + nms[0]
-        else:
-            t = nms[0]
-        if len(nms[1]) == 1:
-            r = '0' + nms[1]
-        else:
-            r = nms[1]
-        if len(nms[2]) == 1:
-            s = '0' + nms[2]
-        else:
-            s = nms[2]
-        trsqq = t + lts[0] + r + lts[1] + s
-        qq =  '{:0<10}'.format(trsqq)[8] + '{:0<10}'.format(trsqq)[9]
-    return qq
-
-def convert_trsqq(x):
-    """
-    convert township, range, section, and quarter-quarter to the taxlot id format
-    """
-    #print(x)
-    x = '{:<08s}'.format(x)
-    #x = re.sub("V|X|Y|Z", "", x)
-    xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + get_qq_code(x)
-    return xt[:16]
-
-def create_ORTaxlot(cnt_code, trsqq, lot):
-    """
-    create the taxlot id based on the county code, township, range, section, and lot number
-    """
-    #print(f'County {cnt_code}, TRSQQ {trsqq}, Lot {lot}')
-    part1 = str(int(cnt_code)).zfill(2) + convert_trsqq(trsqq) 
-    taxlotID = part1 + '--' + ('000000000' + lot)[-9:]
-    tid_dst_2 = [x[-len(lot):] for x in tid_dst_1]    
-    if (taxlotID not in all_txid):
-        if (part1 in tid_dst_0) and (lot in tid_dst_2):
-            txl_ID_lst = [tid for tid in tid_dst if (re.search(part1, tid)) and (re.search(lot, tid))]
-            if len(txl_ID_lst) > 0:
-                taxlotID = txl_ID_lst[0]
-            else:
-                ntaxlotID = taxlotID[:6]+taxlotID[7:12]+taxlotID[13:18]+'00--'+taxlotID.split('--')[1]
-                if ntaxlotID in all_txid:
-                    taxlotID = ntaxlotID         
-    return taxlotID
-
-def reindex_data(wd_dt):
-    """
-    reindex the data based on the number of lots in each parcel id
-    wd_dt is from read_wd_table or reorganize_tocheck
-    make sure the records are with lot numbers
-    return reindexed data
-    """
-    # get a list of lot numbers in each parcel id record
-    # will need to review the records without any parcel ids
-    selectedID = wd_dt.parcel_id.astype(str) != 'nan'
-    wd_dt = wd_dt.copy()[selectedID]
-    wd_dt.loc[:, 'lots'] = wd_dt['parcel_id'].apply(lambda x: get_lot_numbers(x))
-    # repeat the rows based on the number of lot numbers
-    ndf = wd_dt.reindex(wd_dt.index.repeat(wd_dt.lots.str.len()))
-    # add the column to list the lot for all
-    ndf.loc[:, 'lot'] = list(chain.from_iterable(wd_dt.lots.values.tolist()))
-    ndf.loc[:, 'lots'] = ndf['lots'].apply(lambda x: ', '.join(dict.fromkeys(x).keys()))
-    # get county code
-    ndf.loc[:, 'cnt_code'] = ndf.county.map(COUNTY_DICT)
-    # get OR taxlot IDs for wd data
-    ndf = ndf[~ndf.cnt_code.isnull()]
-    ndf.loc[:, 'ORTaxlot'] = ndf[['cnt_code', 'trsqq', 'lot']].apply(lambda row: create_ORTaxlot(cnt_code=row.cnt_code, trsqq=row.trsqq, lot=row.lot), axis = 1)
-    return ndf
-
 def make_notes(text):
     """
     add notes to the wd records
@@ -1828,17 +1416,17 @@ def combine_wd_tables(setID, nm_to_add, raw=True):
     """  
     if raw:
         frames = []
-        files = list_files(os.path.join(wdpath, setID))
+        files = list_files(os.path.join(WD_PATH, setID))
         # in case there are unidentified files
         files = [file for file in files if '~$' not in file]
         for file in files:
-            datafile = os.path.join(wdpath, setID, file)
+            datafile = os.path.join(WD_PATH, setID, file)
             xl = pd.ExcelFile(datafile)
             wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
             frames.append(wd_dt)
         wd_df = pd.concat(frames, ignore_index=True)
     else:
-        wd_df = pd.read_csv(wdpath+f'\\Corrected_by_Set\\{setID}.csv')
+        wd_df = pd.read_csv(fr'{WD_PATH}\Corrected_by_Set\{setID}.csv')
   
     # this creates unique IDs for all the records in the same set
     wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1) 
@@ -1933,7 +1521,7 @@ def combined_reindexed_data(setID, nm_to_add):
     combine reindexed wd data in the same set folder
     """
     frames = []
-    files = list_files(os.path.join(wdpath, setID))
+    files = list_files(os.path.join(WD_PATH, setID))
     # in case there are unidentified files
     files = [file for file in files if '~$' not in file]
     for file in files:
@@ -1953,7 +1541,7 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
     make sure the matched_records_{setID}.shp is not the updated version from a previous run when update is true
     """
     tocheck_txid = df.ORTaxlot.unique()
-    found = [txid for txid in tocheck_txid if txid in all_txid]
+    found = [txid for txid in tocheck_txid if txid in ALL_TXID]
     # unfound = [txid for txid in tocheck_txid if txid not in all_txid]
     # if len(unfound) > 0:
     #     sdf = df[df.ORTaxlot.isin(unfound)]
@@ -2282,7 +1870,7 @@ def get_trsqq_list():
     """
     get trsqq list, dictionary, and dataframe
     """    
-    taxlotIDs_to_search = all_txid
+    taxlotIDs_to_search = ALL_TXID
     taxlotIDs_cleaned = remove_duplicates([txID for txID in taxlotIDs_to_search if len(txID) == 29])
     trsqq = list(map(lambda x: taxlot2trsqq(x), taxlotIDs_cleaned))
     trsqq_dict = dict(zip(trsqq, taxlotIDs_cleaned))
@@ -2299,13 +1887,13 @@ def get_maybe_taxlot(trsqq_to_check):
     get the maybe taxlot from the trsqq_to_check
     this is a test function
     """    
-    closematch = difflib.get_close_matches(trsqq_to_check, trsqq)
+    closematch = difflib.get_close_matches(trsqq_to_check, TRSQQ)
     trsqq_matched = remove_duplicates(closematch)
-    checktaxlot = [*map(trsqq_dict.get, trsqq_matched)]
+    checktaxlot = [*map(TRSQQ_DICT.get, trsqq_matched)]
     string_to_search = trsqq_matched[0][0:8]
-    search_res = remove_duplicates([i for i in remove_duplicates(ttdf.trsqq) if string_to_search in i])
+    search_res = remove_duplicates([i for i in remove_duplicates(TTDF.trsqq) if string_to_search in i])
     if len(checktaxlot) == 1 and len(search_res)==1:
-        values = [i for i in trsqq_dict if trsqq_dict[i]==checktaxlot[0]]
+        values = [i for i in TRSQQ_DICT if TRSQQ_DICT[i]==checktaxlot[0]]
     else:
         values = search_res
     return values

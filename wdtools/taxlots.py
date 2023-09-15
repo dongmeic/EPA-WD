@@ -5,17 +5,16 @@ import fiona
 import geopandas as gpd
 import pandas as pd
 
+from const import COUNTY_DICT, TAXLOT_PATH
 from utils import all_a_in_b, read_geo_data, remove_duplicates
 
 
 class TaxlotReader:
-    def __init__(self, taxlot_path, county_list):
+    def __init__(self, county_list):
         '''
         Args:
-        - taxlot_path (str): path to Taxlot data
         - county_list (list?): list of counties to use
         '''
-        self.taxlot_path = taxlot_path
         self.county_list = county_list
         self.list_cols = [
             'County', 'Town', 'TownPart', 'TownDir', 'Range', 'RangePart',
@@ -30,7 +29,7 @@ class TaxlotReader:
     def read(self, year):
         'Read taxlots prior to 2018'
         self.year = year
-        self.gdb = self.taxlot_path + f'\\Taxlots{year}.gdb'
+        self.gdb = fr'{TAXLOT_PATH}\Taxlots{year}.gdb'
         frames = None
         if year in [2016, 2017]:
             frames = self._get_frames_2016_17()
@@ -123,7 +122,7 @@ class TaxlotReader:
         return list(x)
 
     def _get_frames_2012(self):
-        taxlot_dir = self.taxlot_path + f'\\Taxlots{self.year}'
+        taxlot_dir = fr'{TAXLOT_PATH}\Taxlots{self.year}'
         dir_list = os.listdir(taxlot_dir)
         layers = [
             layer for layer in dir_list if layer not in ['Umatilla', 'Lane']]
@@ -135,14 +134,14 @@ class TaxlotReader:
 
     def _get_taxlot_from_layer_2012(self, layer, taxlot_dir):
         print('Getting taxlots from layer:', layer)
-        path = f'{taxlot_dir}\\{layer}'
+        path = fr'{taxlot_dir}\{layer}'
         txt = 'taxlot|Taxlot'
         files = os.listdir(path)
         file_list = list(
             filter(lambda x: re.search(txt, x, re.IGNORECASE), files))
         selected_files = [f for f in file_list if 'Taxlots' not in f]
         file_path = selected_files[0].split('.')[0]
-        taxlot = read_geo_data(f'{path}\\{file_path}.shp')
+        taxlot = read_geo_data(fr'{path}\{file_path}.shp')
         taxlot_cols_caps = [x.capitalize() for  x in taxlot.columns]
         if all_a_in_b(self.list_cols, taxlot.columns):
             taxlot = taxlot[self.list_cols]
@@ -158,9 +157,7 @@ class TaxlotReader:
 
 
 class MapIndexReader:
-    def __init__(self, taxlot_path, county_dict):
-        self.taxlot_path = taxlot_path
-        self.county_dict = county_dict
+    def __init__(self):
         self.col_names = ['County', 'ORMapNum', 'geometry']
         self.available_years = [2011, 2012]
 
@@ -179,7 +176,7 @@ class MapIndexReader:
 
     def _read_2012(self):
         frames = []
-        dir_list = os.listdir(fr'{self.taxlot_path}\Taxlots2012')
+        dir_list = os.listdir(fr'{TAXLOT_PATH}\Taxlots2012')
         for layer in dir_list:
             layer_gdf = self._get_layer_gdf(layer, 2012)
             frames.append(layer_gdf)
@@ -187,10 +184,12 @@ class MapIndexReader:
         return gdf
 
     def _get_layer_gdf(self, layer, year):
-        path = fr'{self.taxlot_path}\Taxlots{year}\{layer}'
+        path = fr'{TAXLOT_PATH}\Taxlots{year}\{layer}'
         files = os.listdir(path)
         file_list = list(
-            filter(lambda x: re.search('mapindex|MIndex', x, re.IGNORECASE), files))
+            filter(
+                lambda x: re.search(
+                    'mapindex|MIndex', x, re.IGNORECASE), files))
         file_name = file_list[0].split('.')[0]
         layer_file = fr'{path}\{file_name}.shp'
         gdf = read_geo_data(layer_file)
@@ -203,12 +202,14 @@ class MapIndexReader:
     def _fix_gdf_columns(self, gdf, layer, year):
         gdf.columns = [x.capitalize() for x in gdf.columns]
         column_rename_map = {
-            'First_orma': 'ORMapNum', 'Geometry': 'geometry', 'Ormapnum': 'ORMapNum'}
+            'First_orma': 'ORMapNum',
+            'Geometry': 'geometry',
+            'Ormapnum': 'ORMapNum'}
         if all_a_in_b(self.col_names, gdf.columns):
             gdf.rename(columns=column_rename_map, inplace=True)
             gdf = gdf[self.col_names]
         elif 'County' not in gdf.columns:
-            gdf['County'] = int(self.county_dict[layer])
+            gdf['County'] = int(COUNTY_DICT[layer])
             gdf.rename(columns=column_rename_map, inplace=True)
             gdf = gdf[self.col_names]
         else:
