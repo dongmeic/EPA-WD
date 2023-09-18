@@ -49,6 +49,19 @@ def create_ORMap_name(county, trsqq):
     return map_idx
 
 
+def list_files(path, is_folder=False):
+    '''This function takes a path and returns a list of files in the path and its
+    subdirectories
+    '''
+    f = []
+    for (dirpath, dirnames, filenames) in os.walk(path):
+        f.extend(filenames)
+        break
+    if is_folder:
+        f = [x[0] for x in os.walk(path)]
+    return f
+
+    
 def read_geo_data(layer_file):
     '''Read geodata with a geometry check
     Args:

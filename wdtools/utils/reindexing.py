@@ -1,7 +1,7 @@
 from itertools import chain
 import re
 
-from const import ALL_TXID, COUNTY_DICT, TID_DST, TID_DST_0, TID_DST_1
+from ..const import ALL_TXID, COUNTY_DICT, TID_DST, TID_DST_0, TID_DST_1
 from lot_numbers import get_lot_numbers
 from trsqq_conversion import convert_trsqq
 

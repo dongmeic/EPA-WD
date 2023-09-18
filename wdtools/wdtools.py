@@ -4,7 +4,6 @@ import difflib
 import io
 import json
 import os
-from os import walk
 import pickle
 import re
 import string
@@ -36,6 +35,8 @@ from utils import (
     check_duplicates, create_ORMap_name, remove_duplicates, split_WD_to_taxmaps)
 from utils.lot_numbers import get_lot_numbers
 from utils.reindexing import reindex_data
+from utils.wd_tables import clean_wd_table, combine_wd_tables
+from utils.utils import list_files
 
 warnings.filterwarnings('ignore', category=ShapelyDeprecationWarning)
 
@@ -204,83 +205,6 @@ def get_all_wd(n, is_raw=False):
     return wd_df
 
 
-## HERE: move to utils
-def combine_wd_tables(setID, n_to_add, is_raw=True):
-    '''Combine all the wd tables in the set to review unique records, record_ID is
-    used for combined tables.
-    Use this function when reindex is not neccessary
-    Args:
-    -n_to_add (int) the number of previous records (records from the previous sets;
-        same for all functions with this variable)
-    '''
-    if is_raw:
-        frames = []
-        files = list_files(os.path.join(WD_PATH, setID))
-        # in case there are unidentified files
-        files = [f for f in files if '~$' not in f]
-        for f in files:
-            data_file = os.path.join(WD_PATH, setID, f)
-            xl = pd.ExcelFile(data_file)
-            wd_dt = pd.read_excel(data_file, sheet_name=xl.sheet_names[1])
-            frames.append(wd_dt)
-        wd_df = pd.concat(frames, ignore_index=True)
-    else:
-        wd_df = pd.read_csv(fr'{WD_PATH}\Corrected_by_Set\{setID}.csv')
-    # this creates unique IDs for all the records in the same set
-    wd_df['record_ID'] = range(1, wd_df.shape[0] + 1) 
-    wd_df['record_ID'] = wd_df.copy().record_ID + n_to_add
-    selected_ids = wd_df.parcel_id.astype(str) != 'nan'
-    wd_df.loc[selected_ids, 'notes'] = (
-        wd_df[selected_ids]['parcel_id'].apply(lambda x: make_notes(x)))
-    # get year from the receive date
-    if raw:
-        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: x.year)
-    else:
-        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(
-            lambda x: int(x.split('-')[0]))
-    # get year from the wd ID 
-    wd_df['IDyear'] = wd_df.wetdet_delin_number.apply(lambda x: x[2:6]) 
-    selected_ids = wd_df.parcel_id.astype(str) != 'nan'
-    wd_df.loc[selected_ids, 'missinglot'] = wd_df[selected_ids].parcel_id.apply(
-        lambda x: without_lots(x))
-    return wd_df
-
-
-def make_notes(text):
-    """
-    add notes to the wd records
-    """
-    r = re.search('ROW|RR', text, re.IGNORECASE)
-    p = re.search('partial|part|p|portion', text, re.IGNORECASE)
-    m = re.search('Many|multiple|SEVERAL|various', text, re.IGNORECASE)
-    w = re.search('Water', text, re.IGNORECASE)
-    l = re.search('RAIL', text, re.IGNORECASE)
-    res = []
-    for srch, msg in zip([r, p, m, w, l], ['ROW','Partial','Many','Water','Rail']):
-        if srch:
-            #res += msg
-            res.append(msg)
-    res = ', '.join(res)
-    return res
-
-
-def without_lots(text):
-    """
-    check whether the parcel ID is without lots
-    """
-    if any(c.isdigit() for c in text):
-        nms = re.findall(r'\d+', text)
-        if all([any([x in text for x in [nm+'st', nm+'nd', nm+'rd', nm+'th',
-                                                  nm+' st', nm+' th', nm+' nd', nm+' rd']]) for nm in nms]):
-            res = 'Y'
-        else:
-            res = 'N'
-    else:
-        res = 'Y'
-    return res
-
-
-
 def get_added_SA():
     path = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb'
     lyrs = [lyr for lyr in fiona.listlayers(path)]
@@ -291,6 +215,7 @@ def get_added_SA():
         frames.append(sa)
     sadf = pd.concat(frames, ignore_index=True)
     return sadf
+
 
 def get_all_SA(num):
     """
@@ -1367,17 +1292,7 @@ def report2DSL(setID):
     
 ################################################ Tier 1 #####################################################
 # gdf below generally refers to the matched records
-def list_files(path, folder=False):
-    """
-    This function takes a path and returns a list of files in the path
-    """
-    f = []
-    for (dirpath, dirnames, filenames) in walk(path):
-        f.extend(filenames)
-        break
-    if folder:
-        f = [x[0] for x in os.walk(path)]
-    return f
+
 
 #def unique(list1):
 #    """
@@ -1386,18 +1301,6 @@ def list_files(path, folder=False):
 #    x = np.array(list1)
 #    return list(np.unique(x))
 
-
-def read_wd_table(setID, file):
-    """
-    read wd tables, recordID is used for single tables
-    """
-    datafile = os.path.join(WD_PATH, setID, file)
-    xl = pd.ExcelFile(datafile)
-    wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
-    wd_dt.loc[:, 'county'] = wd_dt.county.apply(lambda x: x.capitalize())
-    # this will show the records in the original single table and the ID will be updated when the tables are combined
-    wd_dt.loc[:, 'recordID'] = range(1, wd_dt.shape[0] + 1)
-    return wd_dt
 
 def scan_trsqq(x):
     """
@@ -1420,34 +1323,6 @@ def scan_trsqq(x):
         res=0
         return res
     
-
-def clean_wd_table(setID, file):
-    """
-    function to clean up wd data by single file
-    """
-    wd_dt = read_wd_table(setID, file)
-    # this will help identify problematic records with numbers
-    selectedID = wd_dt.parcel_id.astype(str) != 'nan'
-    wd_dt.loc[selectedID, 'notes'] = wd_dt.copy()[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
-    wd_dt['county'] = wd_dt['county'].apply(lambda x: x.title())
-    wd_dt = wd_dt[wd_dt.county.isin(OR_COUNTIES)]
-    if wd_dt.empty:
-        res = wd_dt
-    else:
-        ndf = reindex_data(wd_dt)
-        # get year from the receive date
-        ndf.loc[:, 'recyear'] = ndf.copy().received_date.apply(lambda x: x.year)
-        # get year from the wd ID 
-        ndf.loc[:, 'IDyear'] = ndf.wetdet_delin_number.apply(lambda x: x[2:6])
-        ndf.loc[selectedID, 'missinglot'] = ndf.loc[selectedID, 'parcel_id'].apply(lambda x: without_lots(x))
-        ndf['response_date'] = ndf['response_date'].dt.strftime("%Y-%m-%d")
-        ndf['received_date'] = ndf['received_date'].dt.strftime("%Y-%m-%d")
-        ndf['county'] = ndf['county'].apply(lambda x: x.title())
-        ndf = ndf[ndf.county.isin(OR_COUNTIES)]
-        res = ndf
-        #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
-    return res
-
 
 def read_taxlot(year, mute=True):
     """
