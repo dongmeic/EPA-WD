@@ -29,6 +29,7 @@ from const import (
     YEAR_END)
 from sa_splitting import SASplitter
 from taxlots import MapIndexReader, TaxlotReader
+from tiers_3_4 import LoopR1Reviewer
 from utils.lot_numbers import get_lot_numbers
 from utils.reindexing import reindex_data
 from utils.wd_tables import clean_wd_table, combine_wd_tables
@@ -296,73 +297,23 @@ removeFormatting = remove_formatting
 
 
 
-################################################ Tier 3 & 4 #####################################################
-
-def writelist(lst, lstnm, setID):
-    """
-    write a list to a pickle file
-    """
-    with open(os.path.join(INPATH, f'{setID}_{lstnm}.pkl'), 'wb') as f:
-            pickle.dump(lst, f)
+# Tiers 3 & 4 -------------------------------------------------------------
+def writelist(lst, list_name, set_id):
+    'Write a list to a pickle file'
+    with open(os.path.join(INPATH, f'{set_id}_{list_name}.pkl'), 'wb') as f:
+        pickle.dump(lst, f)
+        
     
-def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False, wd_id=None, wddf=None):
-    """
-    loop through the unmatched records and check the original records
-    """
-    toadd=[]
-    if not partial:
-        df = pd.read_csv(os.path.join(
-            INPATH, f'\\output\\to_review\\unmatched_df_{setID}_r1_N.csv'))
-    if df is not None:
-        wdid_list = list(df.wetdet_delin_number.unique())
-    else:
-        if wdid_list is None:
-            print("need to provide a list of wdID..")
-            return None
-    n = len(wdid_list)
-    if wd_id is None:
-        i = -1
-    else:
-        i =  wdid_list.index(wd_id)
-    for wdID in wdid_list[i+1:]:
-        j = wdid_list.index(wdID)
-        print(f'{round(((j/n)*100),1)}% digitized, {n-j} records remained, expected to be done in about {int(((n-j)*0.8)+0.5)} hours...')
-        print(wdID)
-        if idx:
-            if df is not None:
-                print(f'index = {df[df.wetdet_delin_number==wdID].index[0]+1}')
-                print(check_unmatched_r1(wdID = wdID, df = df))
-            else:
-                print(f'index = {wdid_list.index(wdID)+1}')
-                print(check_unmatched_r1(wdID = wdID, df = wddf)) 
-        user_input = input("Press 'p' to pause or any key to stop...")
-        if user_input in ['p', 'P']:
-            while True:
-                user_input = input("Press 'a' to add the wd record or 'c' to continue...")
-                if user_input in ['a', 'A']:
-                    toadd.append(wdID)
-                    break
-                if user_input in ['c', 'C']:
-                    break
-        else:
-            break
-        time.sleep(1)
-    if toadd != []:
-        return toadd, wdID
+def review_loop_r1(
+        set_id=None, wd_id_list=None, df=None, is_partial=False,
+        do_print_index=False, wd_id=None, wd_df=None):
+    return LoopR1Reviewer(
+        set_id=None, wd_id_list=None, df=None, is_partial=False,
+        do_print_index=False, wd_id=None, wd_df=None
+    ).review()
 
-def check_unmatched_r1(wdID, df):
-    """
-    check unmatched records for a given WDID
-    df is from the splited unmatched records from r1 process
-    """
-    url = df.loc[df.wetdet_delin_number == wdID, 'DecisionLink'].values[0]
-    selcols = ['county', 'trsqq', 'parcel_id', 'latitude', 'longitude', 'record_ID', 'notes', 'missinglot', "status_name", "is_batch_file"]
-    if str(url) == 'nan':
-        print('Decision link is not available')
-    else:
-        webbrowser.open(url)
-    return df.loc[df.wetdet_delin_number == wdID, selcols]
 
+# HERE ################################
 def review_loop(setID):
     """
     loop through the unmatched records and check the review notes
