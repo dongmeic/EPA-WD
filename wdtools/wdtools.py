@@ -1,4 +1,3 @@
-# TODO: replace paths with pathlib.Path
 from collections import Counter
 import difflib
 import io
@@ -20,7 +19,6 @@ import openpyxl
 import pandas as pd
 from PyPDF2 import PdfReader, PdfWriter
 import requests
-#from shapely.geometry import shape
 from shapely.validation import make_valid
 from shapely.errors import ShapelyDeprecationWarning
 from win32com.client import Dispatch
@@ -31,12 +29,12 @@ from const import (
     YEAR_END)
 from deliverables import SASplitter
 from taxlots import MapIndexReader, TaxlotReader
-from utils import (
-    check_duplicates, create_ORMap_name, remove_duplicates, split_WD_to_taxmaps)
 from utils.lot_numbers import get_lot_numbers
 from utils.reindexing import reindex_data
 from utils.wd_tables import clean_wd_table, combine_wd_tables
-from utils.utils import list_files
+from utils.utils import (
+    check_duplicates, list_files, remove_duplicates)
+from wd_tables import WDSAJoiner
 
 warnings.filterwarnings('ignore', category=ShapelyDeprecationWarning)
 
@@ -62,6 +60,7 @@ def read_trsqq():
         trsqq_dict = pickle.load(f) 
     df = pd.read_csv(os.path.join(INPATH, 'trsqq_df.csv'))
     return trsqq, trsqq_dict, df
+
 
 # More to deal with later...
 cnts = gpd.read_file(f'{INPATH}\\GIS\\Oregon_Counties.shp')
@@ -206,78 +205,44 @@ def get_all_wd(n, is_raw=False):
 
 
 def get_added_SA():
-    path = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb'
-    lyrs = [lyr for lyr in fiona.listlayers(path)]
+    path = fr'{INPATH}\GIS\ArcGIS Pro Project\DataReview\added.gdb'
     frames = []
-    for lyr in lyrs:
-        sa = gpd.read_file(path, layer=lyr)
+    for layer in fiona.listlayers(path):
+        sa = gpd.read_file(path, layer=layer)
         sa = sa.to_crs(epsg=2992)
         frames.append(sa)
     sadf = pd.concat(frames, ignore_index=True)
     return sadf
 
 
-def get_all_SA(num):
-    """
-    combine all the SA polygons into one dataframe
-    allsa is to check all SA polygons after reviewing issue IDs
-    """  
+def get_all_SA(n):
+    '''Combine all the SA polygons into one dataframe; allsa is to check all SA
+    polygons after reviewing issue IDs
+    '''
     frames = []
-    for i in range(num):
-        file1 = OUTPATH + f'\\final\\mapped_wd_Set00{i+1}.shp'
-        file2 = OUTPATH + f'\\final\\Set00{i+1}_mapped_wd.shp'
-        if os.path.exists(file2):
-            sa_dt = gpd.read_file(file2)
-        else:
-            sa_dt = gpd.read_file(file1)
-        sa_dt['SetID'] = i+1
+    for i in range(n):
+        path1 = fr'{OUTPATH}\final\Set00{i + 1}_mapped_wd.shp'
+        path2 = fr'{OUTPATH}\final\mapped_wd_Set00{i + 1}.shp'
+        path = path1 if os.path.exists(path1) else path2
+        sa_dt = gpd.read_file(path)
+        sa_dt['SetID'] = i + 1
         frames.append(sa_dt)
     sa_df = pd.concat(frames, ignore_index=True)
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
     added = get_added_SA()
-    sa_gdf = pd.concat([sa_gdf[['wdID', 'code', 'geometry']], 
-                   added[['wdID', 'code', 'geometry']]], 
-                   ignore_index=True)
+    sa_gdf = pd.concat(
+        [sa_gdf[['wdID', 'code', 'geometry']],
+         added[['wdID', 'code', 'geometry']]], 
+        ignore_index=True)
     return sa_gdf
 
-def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=True):
-    """
-    df is the corrected WD dataframe from get_all_wd
-    gdf is the SA polygons from get_all_SA
-    mapindex is the combined taxmaps from read_all_mapIdx
-    """
-    frames = []
-    wdlist = gdf.wdID.unique()
-    df['ORMapNum'] = df[['county', 'trsqq']].apply(lambda row: create_ORMap_name(county=row.county, trsqq=row.trsqq), axis = 1)
-    for wid in wdlist:
-        #print(wid)
-        df_s = df[df.wetdet_delin_number==wid]
-        gdf_s = gdf[gdf.wdID==wid]
-        ORmn = df_s.ORMapNum.values
-        yr = wid[2:6]
-        mapIdx = mapindex[(mapindex.ORMapNum.isin(ORmn)) & (mapindex.year==yr)]
-        exp_gdf = split_WD_to_taxmaps(df=df_s, gdf=gdf_s, wdID=wid, mapindex=mapIdx)
-        exp_gdf['lat'], exp_gdf['lon'] = TRANSFORMER.transform(exp_gdf.representative_point().x, exp_gdf.representative_point().y)
-        ndf = df_s.drop_duplicates(subset='ORMapNum')
-        ndf.drop(columns=['parcel_id','site_id','record_ID'], inplace=True)
-        g = df_s.groupby('ORMapNum')
-        pi_df = g.apply(lambda x: '; '.join(x.parcel_id.astype(str).unique())).to_frame(name='parcel_id').reset_index(drop=True)
-        si_df = g.apply(lambda x: '; '.join(x.site_id.astype(str).unique())).to_frame(name='site_id').reset_index(drop=True)
-        ri_df = g.apply(lambda x: '; '.join(x.record_ID.astype(str).unique())).to_frame(name='record_ID').reset_index()
-        sdf = pd.concat([ri_df, pi_df, si_df], axis=1)
-        fdf = ndf.merge(sdf, on='ORMapNum')
-        exp_gdf = fdf.merge(exp_gdf[['code','ORMapNum','lat','lon','geometry']], on='ORMapNum')
-        frames.append(exp_gdf)
-    sa_df = pd.concat(frames, ignore_index=True)
-    sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
-    if export:
-        sa_gdf=sa_gdf.rename(columns=COL_DICT)
-        try:
-            sa_gdf.to_file(os.path.join(INPATH, "output", "final", f"{outnm}.shp"), index=False)
-        except RuntimeError:
-            sa_gdf['geometry'] = sa_gdf.geometry.buffer(0)
-            sa_gdf.to_file(os.path.join(INPATH, "output", "final", f"{outnm}.shp"), index=False)
-    return sa_gdf
+
+def join_WD_with_SA_by_taxmap(
+        df, gdf, mapindex, outnm='wd_mapped_data', export=True):
+    return WDSAJoiner(
+        df, gdf, mapindex, outnm='wd_mapped_data', export=True
+    ).join()
+
  
 ################################################ Report #########################################################
 
