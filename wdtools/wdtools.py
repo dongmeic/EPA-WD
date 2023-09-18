@@ -28,15 +28,16 @@ from win32com.client import Dispatch
 
 from const import (
     ALL_TXID, COL_DICT, COUNTY_DICT, INPATH, OR_COUNTIES, OUTPATH, TAXLOT_PATH,
-    TRANSFORMER, TRSQQ, TRSQQ_DICT, TSQ_DST, TTDF, VAR_LIST, WD_PATH)
+    TRANSFORMER, TRSQQ, TRSQQ_DICT, TSQ_DST, TTDF, VAR_LIST, WD_PATH, YEAR_START,
+    YEAR_END)
 from deliverables import SASplitter
 from taxlots import MapIndexReader, TaxlotReader
 from utils import (
-    check_duplicates, create_ORMap_name, get_lot_numbers, reindex_data,
-    remove_duplicates, split_WD_to_taxmaps)
+    check_duplicates, create_ORMap_name, remove_duplicates, split_WD_to_taxmaps)
+from utils.lot_numbers import get_lot_numbers
+from utils.reindexing import reindex_data
 
-
-warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
+warnings.filterwarnings('ignore', category=ShapelyDeprecationWarning)
 
 
 # Clean up for now; will deal with placement later...
