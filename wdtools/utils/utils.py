@@ -33,20 +33,6 @@ def convert_trsqq(x):
     TrsqqConverter().convert(x)
 
 
-#def create_ORMap_name(county, trsqq):
-#    'Return ORMap number based on county name and trsqq'
-#    with open(os.path.join(INPATH, 'ORMapIndex.pkl'), 'rb') as f:
-#        all_map_idx = pickle.load(f)
-#    part1 = str(int(COUNTY_DICT[county])).zfill(2) + convert_trsqq(trsqq)
-#    map_idx = f'{part1}--0000'
-#    if map_idx not in all_map_idx:
-#        if part1 in TID_DST_0:
-#            for mid in [part1+f'--{x}000' for x in ['D', 'S', 'T']]:
-#                if mid in all_map_idx:
-#                    map_idx = mid
-#    return map_idx
-
-
 def list_files(path, is_folder=False):
     '''This function takes a path and returns a list of files in the path and its
     subdirectories
@@ -90,26 +76,3 @@ def read_geo_data(layer_file):
 def remove_duplicates(lst):
     'Remove duplicates from a list <lst>'
     return list(set(lst))
-
-
-#def split_WD_to_taxmaps(df, gdf, wdID, map_index):
-#    '''Splits the WD SA ploygons by taxmap                           
-#    Args:
-#    - gdf (GeoDatFrame): geodataframe that contains the selected WD ID
-#    - map_index (GeoDataFrame): taxmap geodataframe of the year
-#    '''
-#    selected_map_ids = df[df.wetdet_delin_number==wdID].ORMapNum.unique()
-#    gdf = gdf[gdf.wdID == wdID]
-#    selected_map_index = map_index[['ORMapNum','geometry']][
-#        map_index.ORMapNum.isin(selected_map_ids)]
-#    try:
-#        inter = gpd.overlay(
-#            gdf, selected_map_index, how='intersection', keep_geom_type=False)
-#    except NotImplementedError:
-#        gdf['geometry'] = gdf.geometry.buffer(0)
-#        inter = gpd.overlay(
-#            gdf, selected_map_index, how='intersection', keep_geom_type=False)
-#    inter = inter.dissolve('ORMapNum')
-#    inter['ORMapNum'] = inter.index
-#    inter.reset_index(drop=True, inplace=True)
-#    return inter

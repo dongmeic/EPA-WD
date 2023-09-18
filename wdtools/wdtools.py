@@ -27,13 +27,12 @@ from const import (
     ALL_TXID, COL_DICT, COUNTY_DICT, INPATH, OR_COUNTIES, OUTPATH, TAXLOT_PATH,
     TRANSFORMER, TRSQQ, TRSQQ_DICT, TSQ_DST, TTDF, VAR_LIST, WD_PATH, YEAR_START,
     YEAR_END)
-from deliverables import SASplitter
+from sa_splitting import SASplitter
 from taxlots import MapIndexReader, TaxlotReader
 from utils.lot_numbers import get_lot_numbers
 from utils.reindexing import reindex_data
 from utils.wd_tables import clean_wd_table, combine_wd_tables
-from utils.utils import (
-    check_duplicates, list_files, remove_duplicates)
+from utils.utils import check_duplicates, list_files, remove_duplicates
 from wd_tables import WDSAJoiner
 
 warnings.filterwarnings('ignore', category=ShapelyDeprecationWarning)
@@ -83,7 +82,7 @@ def read_map_index(year):
 ReadMapIndex = read_map_index
 
 
-# Deliverable -------------------------------------------------------------
+# Deliverables -------------------------------------------------------------
 def format_gdf_provided(gdf, wdID):
     'Format gdf provided to be in the same format as mapped records'
     gdf['wdID'] = wdID
@@ -244,60 +243,59 @@ def join_WD_with_SA_by_taxmap(
     ).join()
 
  
-################################################ Report #########################################################
-
+# Reports -----------------------------------------------------------------
 def flatten(l):
-    """
-    convert lists in list to a list
-    """
+    'Convert lists in list to a flat list'
     return [item for sublist in l for item in sublist]
 
-def count_lst_ele(dct, lst, ctnm):
-    """
-    count list elements
-    ctnm - count number
-    """
-    qaqc_cnt = [*map(dct.get, lst)]
-    freq = Counter(qaqc_cnt)
+
+def count_list_elements(dct, lst, county_n):
+    '''Count list elements
+    Args:
+    - county_n (int): county number
+    '''
+    qaqc_count = [*map(dct.get, lst)]
+    freq = Counter(qaqc_count)
     df = pd.DataFrame(sorted(freq.items()))
-    df.columns = ['county', ctnm]
+    df.columns = ['county', county_n]
     return df
 
-def read_list(setid):
-    """
-    read a list 
-    """
-    with open(os.path.join(INPATH, f"{setid}_mapped.pkl"), "rb") as f:
+
+def read_list(set_id):
+    'Read a pickled list '
+    with open(os.path.join(INPATH, f'{set_id}_mapped.pkl'), 'rb') as f:
         lst = pickle.load(f)
     return lst
 
+
+def reformat(file_name):
+    'Reformat Excel'
+    wb = openpyxl.load_workbook(file_name)
+    ws = wb.active
+    ws = remove_formatting(ws)
+    wb.save(file_name)
+    print("Removed format")
+    excel = Dispatch('Excel.Application')
+    wb = excel.Workbooks.Open(file_name)
+    excel.Worksheets(1).Activate()
+    excel.ActiveSheet.Columns.AutoFit()
+    wb.Close(True)
+    print("Autofitted columns...")
+
+
 # clean all formats
-def removeFormatting(ws):
-    """
-    remove Excel format
-    """
+def remove_formatting(ws):
+    'Remove Excel format'
     # ws is not the worksheet name, but the worksheet object
     for row in ws.iter_rows():
         for cell in row:
             cell.style = 'Normal'
     return ws
 
-def reformat(file):
-    """
-    reformat Excel
-    """    
-    wb = openpyxl.load_workbook(file)
-    ws = wb.active
-    ws = removeFormatting(ws)
-    wb.save(file)
-    print("Removed format")
-    excel = Dispatch('Excel.Application')
-    wb = excel.Workbooks.Open(file)
-    excel.Worksheets(1).Activate()
-    excel.ActiveSheet.Columns.AutoFit()
-    wb.Close(True)
-    print("Autofitted columns...")
-    
+removeFormatting = remove_formatting
+
+
+
 ################################################ Tier 3 & 4 #####################################################
 
 def writelist(lst, lstnm, setID):
