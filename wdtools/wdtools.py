@@ -41,8 +41,6 @@ warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 
 # Clean up for now; will deal with placement later...
 google_key = json.load(open('config/keys.json'))['google_maps']['APIKEY']
-yearstart = 2016
-yearend = 2023
 #outfolder = 'test'
 outfolder = 'output\\matched'
 trsqq_correction_dict = dict(
@@ -52,6 +50,7 @@ trsqq_correction_dict = dict(
          'range direction', 'section number', 'QQ']))
 nm2add = [0, 1420, 2143, 2878, 3932, 4370]
 issuepath = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\issueIDs.gdb'
+
 
 def read_trsqq():
     'Read trsqq list, dictionary, and dataframe'    
@@ -83,7 +82,6 @@ def read_map_index(year):
 ReadMapIndex = read_map_index
 
 
-# TODO: continue here--refactor
 # Deliverable -------------------------------------------------------------
 def format_gdf_provided(gdf, wdID):
     'Format gdf provided to be in the same format as mapped records'
@@ -133,81 +131,154 @@ def export_wd_gdf_by_record(gdf, out_name):
 
 
 def split_sa_by_rid(
-        wd_df, sa_gdf_all, all_map_idx, all_taxlot, em_wids, export=False,
-        out_name='example_data', review=False):
+        wd_df, sa_gdf_all, all_map_idx, all_taxlot, em_wids, do_export=False,
+        out_name='example_data', do_review=False):
     return SASplitter(
         VAR_LIST, COL_DICT, OUTPATH, wd_df, sa_gdf_all, all_map_idx,
-        all_taxlot, em_wids, export=False, out_name='example_data',
-        review=False).split_by_rd()
+        all_taxlot, em_wids, do_export=False, out_name='example_data',
+        do_review=False
+    ).split_by_rd()
 
 
 split_SA_by_rid_in_df = split_sa_by_rid
 
 
-# FROM HERE....
-def read_all_mapIdx(exportID=False):
-    """
-    combine mapIndex from all years
-    """
+def read_all_map_idx(do_export=False):
+    'Combine mapIndex from all year'
     frames = []
-    for year in range(yearstart, yearend):
-        mapIdx_dt = read_mapIdx(year)
-        mapIdx_dt['year'] = str(year)
-        frames.append(mapIdx_dt[['year', 'ORMapNum', 'geometry']])
+    for year in range(YEAR_START, YEAR_END):
+        map_idx_dt = read_map_idx(year)
+        map_idx_dt['year'] = str(year)
+        frames.append(map_idx_dt[['year', 'ORMapNum', 'geometry']])
     df = pd.concat(frames, ignore_index=True)
-    gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
-    if exportID:
-        with open(os.path.join(INPATH, "ORMapIndex.pkl"), "wb") as f:
+    gdf = gpd.GeoDataFrame(df, crs='EPSG:2992', geometry='geometry')
+    if do_export:
+        with open(os.path.join(INPATH, 'ORMapIndex.pkl'), 'wb') as f:
             pickle.dump(list(gdf.ORMapNum.unique()), f) 
     return gdf
     
 
-def read_mapIdx(year):
-    """
-    read mapIndex from one year
-    """
-    mapindex = gpd.read_file(
-        f'{INPATH}\\GIS\\ORMAP_data\\ORMAP_Taxlot_Years\\Taxlots{year}.gdb', 
+def read_map_idx(year):
+    'Read mapIndex from one year'
+    map_idx = gpd.read_file(
+        fr'{INPATH}\GIS\ORMAP_data\ORMAP_Taxlot_Years\Taxlots{year}.gdb', 
         layer='MapIndex')
-    return mapindex
+    return map_idx
+
 
 def replace_geometry(gdf):
-    """
-    to replace the geometry of SA ploygons with manual review
-    gdf is the geodataframe that contains the SA polygons to replace
-    rid is record ID
-    """
-    revpath = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\DataReview.gdb'
-    newplys = [lyr for lyr in fiona.listlayers(revpath) if 'rid' in lyr]
+    '''Replace the geometry of SA ploygons with manual review
+    Args:
+    - gdf (geopandas.GeoDataFrame): geodataframe containing the SA polygons to
+      replace
+    (rid is record ID)
+    '''
+    path = f'{INPATH}\GIS\ArcGIS Pro Project\DataReview\DataReview.gdb'
+    new_p_layers = [layer for layer in fiona.listlayers(path) if 'rid' in layer]
     frames = []
-    for nply in newplys:
-        newply = gpd.read_file(revpath, layer=nply)
-        rid = int(nply.replace('rid', ''))
-        newply['record_ID'] = rid
-        frames.append(newply[['record_ID', 'geometry']])
+    for new_p_layer in new_p_layers:
+        new_p_layer = gpd.read_file(path, layer=new_p_layer)
+        rid = int(new_p_layer.replace('rid', ''))
+        new_p_layer['record_ID'] = rid
+        frames.append(new_p_layer[['record_ID', 'geometry']])
     sa_df = pd.concat(frames, ignore_index=True)
     sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
-    selrids = sa_df.record_ID.unique()
+    unique_rids = sa_df.record_ID.unique()
     df = gdf.drop(columns=['geometry'])
-    gdf1 = df[df.record_ID.isin(selrids)].merge(sa_gdf,on='record_ID')
-    gdf2 = pd.concat([gdf[~gdf.record_ID.isin(selrids)], gdf1], ignore_index=True)
+    gdf1 = df[df.record_ID.isin(unique_rids)].merge(sa_gdf,on='record_ID')
+    gdf2 = pd.concat(
+        [gdf[~gdf.record_ID.isin(unique_rids)], gdf1], ignore_index=True)
     return gdf2
 
 
-def get_all_wd(num, raw=False):
-    """
-    combine all the original DSL tables into one dataframe
-    """    
+def get_all_wd(n, is_raw=False):
+    'Combine all the original DSL tables into one dataframe'    
     frames = []
-    for i in range(num):
-        if raw:
-            wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i], raw=True)
-        else:
-            wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i], raw=False)
-        wd_dt['SetID'] = i+1
+    for i in range(n):
+        wd_dt = combine_wd_tables(
+            setID=f'Set00{i + 1}', n_to_add=nm2add[i], is_raw=is_raw)
+        wd_dt['SetID'] = i + 1
         frames.append(wd_dt)
     wd_df = pd.concat(frames, ignore_index=True)
     return wd_df
+
+
+## HERE: move to utils
+def combine_wd_tables(setID, n_to_add, is_raw=True):
+    '''Combine all the wd tables in the set to review unique records, record_ID is
+    used for combined tables.
+    Use this function when reindex is not neccessary
+    Args:
+    -n_to_add (int) the number of previous records (records from the previous sets;
+        same for all functions with this variable)
+    '''
+    if is_raw:
+        frames = []
+        files = list_files(os.path.join(WD_PATH, setID))
+        # in case there are unidentified files
+        files = [f for f in files if '~$' not in f]
+        for f in files:
+            data_file = os.path.join(WD_PATH, setID, f)
+            xl = pd.ExcelFile(data_file)
+            wd_dt = pd.read_excel(data_file, sheet_name=xl.sheet_names[1])
+            frames.append(wd_dt)
+        wd_df = pd.concat(frames, ignore_index=True)
+    else:
+        wd_df = pd.read_csv(fr'{WD_PATH}\Corrected_by_Set\{setID}.csv')
+    # this creates unique IDs for all the records in the same set
+    wd_df['record_ID'] = range(1, wd_df.shape[0] + 1) 
+    wd_df['record_ID'] = wd_df.copy().record_ID + n_to_add
+    selected_ids = wd_df.parcel_id.astype(str) != 'nan'
+    wd_df.loc[selected_ids, 'notes'] = (
+        wd_df[selected_ids]['parcel_id'].apply(lambda x: make_notes(x)))
+    # get year from the receive date
+    if raw:
+        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: x.year)
+    else:
+        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(
+            lambda x: int(x.split('-')[0]))
+    # get year from the wd ID 
+    wd_df['IDyear'] = wd_df.wetdet_delin_number.apply(lambda x: x[2:6]) 
+    selected_ids = wd_df.parcel_id.astype(str) != 'nan'
+    wd_df.loc[selected_ids, 'missinglot'] = wd_df[selected_ids].parcel_id.apply(
+        lambda x: without_lots(x))
+    return wd_df
+
+
+def make_notes(text):
+    """
+    add notes to the wd records
+    """
+    r = re.search('ROW|RR', text, re.IGNORECASE)
+    p = re.search('partial|part|p|portion', text, re.IGNORECASE)
+    m = re.search('Many|multiple|SEVERAL|various', text, re.IGNORECASE)
+    w = re.search('Water', text, re.IGNORECASE)
+    l = re.search('RAIL', text, re.IGNORECASE)
+    res = []
+    for srch, msg in zip([r, p, m, w, l], ['ROW','Partial','Many','Water','Rail']):
+        if srch:
+            #res += msg
+            res.append(msg)
+    res = ', '.join(res)
+    return res
+
+
+def without_lots(text):
+    """
+    check whether the parcel ID is without lots
+    """
+    if any(c.isdigit() for c in text):
+        nms = re.findall(r'\d+', text)
+        if all([any([x in text for x in [nm+'st', nm+'nd', nm+'rd', nm+'th',
+                                                  nm+' st', nm+' th', nm+' nd', nm+' rd']]) for nm in nms]):
+            res = 'Y'
+        else:
+            res = 'N'
+    else:
+        res = 'Y'
+    return res
+
+
 
 def get_added_SA():
     path = f'{INPATH}\\GIS\\ArcGIS Pro Project\\DataReview\\added.gdb'
@@ -592,7 +663,7 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     shp.geometry = shp.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
     final_gdf = shp.dissolve('wdID')
     final_gdf.loc[:, 'wdID'] = final_gdf.index
-    wd = combine_wd_tables(setID=setID, nm_to_add=nm_to_add)
+    wd = combine_wd_tables(setID=setID, n_to_add=nm_to_add)
     unmatchedIDs = [wdID for wdID in wd.wetdet_delin_number.unique() if wdID not in final_gdf.wdID.unique()]
     toCheck = [ID for ID in unmatchedIDs if ID not in issueIDs]
     digitized_nIDs = len(editedIDs) + len(dat.wdID.unique()) + len(wo_lot.wdID.unique())
@@ -1348,23 +1419,6 @@ def scan_trsqq(x):
         res=0
         return res
     
-def make_notes(text):
-    """
-    add notes to the wd records
-    """
-    r = re.search('ROW|RR', text, re.IGNORECASE)
-    p = re.search('partial|part|p|portion', text, re.IGNORECASE)
-    m = re.search('Many|multiple|SEVERAL|various', text, re.IGNORECASE)
-    w = re.search('Water', text, re.IGNORECASE)
-    l = re.search('RAIL', text, re.IGNORECASE)
-    res = []
-    for srch, msg in zip([r, p, m, w, l], ['ROW','Partial','Many','Water','Rail']):
-        if srch:
-            #res += msg
-            res.append(msg)
-    res = ', '.join(res)
-    return res
-
 
 def clean_wd_table(setID, file):
     """
@@ -1393,56 +1447,6 @@ def clean_wd_table(setID, file):
         #print(f'cleaned up wd data in {file} and it took about {end - start} seconds')
     return res
 
-def without_lots(text):
-    """
-    check whether the parcel ID is without lots
-    """
-    if any(c.isdigit() for c in text):
-        nms = re.findall(r'\d+', text)
-        if all([any([x in text for x in [nm+'st', nm+'nd', nm+'rd', nm+'th',
-                                                  nm+' st', nm+' th', nm+' nd', nm+' rd']]) for nm in nms]):
-            res = 'Y'
-        else:
-            res = 'N'
-    else:
-        res = 'Y'
-    return res
-
-def combine_wd_tables(setID, nm_to_add, raw=True):
-    """
-    Combine all the wd tables in the set to review unique records, record_ID is used for combined tables
-    use this function when reindex is not neccessary
-    nm_to_add is the number of previous records (records from the previous sets; same to all functions with this variable)
-    """  
-    if raw:
-        frames = []
-        files = list_files(os.path.join(WD_PATH, setID))
-        # in case there are unidentified files
-        files = [file for file in files if '~$' not in file]
-        for file in files:
-            datafile = os.path.join(WD_PATH, setID, file)
-            xl = pd.ExcelFile(datafile)
-            wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
-            frames.append(wd_dt)
-        wd_df = pd.concat(frames, ignore_index=True)
-    else:
-        wd_df = pd.read_csv(fr'{WD_PATH}\Corrected_by_Set\{setID}.csv')
-  
-    # this creates unique IDs for all the records in the same set
-    wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1) 
-    wd_df.loc[:, 'record_ID'] = wd_df.copy().loc[:, 'record_ID'] + nm_to_add
-    selectedID = wd_df.parcel_id.astype(str) != 'nan'
-    wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
-    # get year from the receive date
-    if raw:
-        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: x.year)
-    else:
-        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: int(x.split('-')[0]))
-    # get year from the wd ID 
-    wd_df.loc[:, 'IDyear'] = wd_df.wetdet_delin_number.apply(lambda x: x[2:6]) 
-    selectedID = wd_df.parcel_id.astype(str) != 'nan'
-    wd_df.loc[selectedID, 'missinglot'] = wd_df[selectedID].parcel_id.apply(lambda x: without_lots(x))
-    return wd_df
 
 def read_taxlot(year, mute=True):
     """
@@ -1485,13 +1489,13 @@ def get_record_dict(setID, wd_df):
     return counties, record_dict
 
 def combine_taxlot(exportID=False, 
-                   yearstart=2016, 
-                   yearend=2023):
+                   YEAR_START=2016, 
+                   YEAR_END=2023):
     """
     combine taxlots from all years
     """
     frames = []
-    for year in range(yearstart, yearend):
+    for year in range(YEAR_START, YEAR_END):
         tx_dt = read_taxlot(year)
         tx_dt['year'] = str(year)
         frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])

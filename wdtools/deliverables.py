@@ -4,13 +4,14 @@ import pandas as pd
 from const import (
     COL_DICT, OR_COUNTIES, OUTPATH, SELECTED_VARS, TRANSFORMER, VAR_LIST)
 from utils import (
-    check_duplicates, create_ORMap_name, reindex_data, split_WD_to_taxmaps)
+    all_a_in_b, check_duplicates, create_ORMap_name, reindex_data,
+    split_WD_to_taxmaps)
 
 
 class SASplitter:
     def __init__(
             self, wd_df, sa_gdf_all, all_map_idx, all_taxlot, em_wids,
-            export=False, out_name='example_data', review=False):
+            do_export=False, out_name='example_data', do_review=False):
         ''' Split study area polygons where multiple record IDs exist.
         rid is record ID.
         Args:
@@ -22,6 +23,9 @@ class SASplitter:
         - all_taxlot (GeoDataFrame?): the combined geodataframe of taxlots from
           all years
         - em_wids (type?): the example WD IDs
+        - do_export (bool): export if true
+        - out_name (str): name of output file
+        - do_review (bool): check if all county names are valid
         Returns:
         - (GeoDataFrame?): the combined geodataframe from split_WD_to_records
         '''
@@ -30,9 +34,9 @@ class SASplitter:
         self.all_map_idx = all_map_idx
         self.all_taxlot = all_taxlot
         self.em_wids = em_wids
-        self.export = export
+        self.do_export = do_export
         self.out_name = out_name
-        self.review = review
+        self.do_review = do_review
 
     def split_by_rid(self):
         wd_df_s = self.wd_df[self.wd_df.wetdet_delin_number.isin(self.em_wids)]
@@ -49,7 +53,7 @@ class SASplitter:
             gdf = self._get_gdf_from_merge()
         gdf['lat'], gdf['lon'] = TRANSFORMER.transform(
             gdf.representative_point().x, gdf.representative_point().y)
-        if self.export:
+        if self.do_export:
             self._export(gdf)
         return gdf
 
@@ -88,11 +92,11 @@ class SASplitter:
             wdID=wid,
             mapindex=map_idx,
             taxlots=taxlot,
-            review=self.review)
+            do_review=self.do_review)
         return frame
 
     def _split_WD_to_records(
-            self, df, gdf, wdID, map_index, taxlots, review=False):
+            self, df, gdf, wdID, map_index, taxlots, do_review=False):
         '''Splits the WD SA ploygons to ploygons by records
         Args:
         - df (pandas.DataFrame): dataframe containing the selected WD ID and
@@ -100,6 +104,7 @@ class SASplitter:
         - gdf (GeoDataFrame?): geodataframe containing the selected WD ID
         - map_index (GeoDataFrame?): taxmap geodataframe of the year
         - taxlots (type?) are the taxlots of the year
+        - do_review (bool): check if all county names are valid
         '''
         ndf = df[df.wetdet_delin_number == wdID]
         counties = ndf.county.unique()
@@ -128,11 +133,12 @@ class SASplitter:
         return out
 
     def _counties_are_valid(self, counties, wdID):
-        if (len(counties) > 1) and not self.review:
+        if (len(counties) > 1) and not self.do_review:
             print(f'{wdID} crosses counties!')
             return False
         ## ?? I think this is a syntax err
-        elif counties.any() not in OR_COUNTIES:
+        #elif counties.any() not in OR_COUNTIES:
+        elif not all_a_in_b(counties, OR_COUNTIES):
             print(f'Check the county name {counties[0]}!')
             return False
         return True

@@ -36,6 +36,7 @@ COL_DICT = {
     'status_name': 'status_nm',
     'wetdet_delin_number': 'wdID'}
 TRANSFORMER = Transformer.from_crs('EPSG:2992', 'EPSG:4326')
+YEAR_START, YEAR_END = 2016, 2023
 
 
 def read_trsqq():
@@ -58,3 +59,5 @@ TSQ_DST = TTDF[TTDF.ORTaxlot.isin(TID_DST)].trsqq.unique()
 
 with open(os.path.join(INPATH, 'ORTaxlot.pkl'), 'rb') as f:
     ALL_TXID = pickle.load(f)
+
+    
