@@ -33,6 +33,7 @@ from shapely.errors import ShapelyDeprecationWarning
 from pyproj import Transformer
 from random import sample
 from shapely.geometry import shape
+import glob
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
@@ -134,14 +135,15 @@ def readGeoData(layer_file):
         gdf = gpd.GeoDataFrame.from_features(collection)
     return gdf
 
-def readTaxlots(year):
+def readTaxlots(year, ORTxt_Only=False, export=False):
     """
     read taxlots prior to 2017 
     """
     frames = []
-    listcols = ['County', 'Town', 'TownPart', 'TownDir', 'Range','RangePart','RangeDir', 'SecNumber',
-                'Qtr', 'QtrQtr', 'Anomaly', 'MapSufType', 'MapNumber', 'ORMapNum', 'Taxlot','MapTaxlot',
-                'ORTaxlot']
+    if ORTxt_Only:
+        listcols = ['ORTaxlot', 'geometry']
+    else:
+        listcols = ['County', 'Town', 'TownPart', 'TownDir','Range','RangePart','RangeDir', 'SecNumber', 'Qtr', 'QtrQtr', 'Anomaly', 'MapSufType', 'MapNumber', 'ORMapNum', 'Taxlot','MapTaxlot', 'ORTaxlot', 'geometry']
     selcols = list(map(lambda x: x.capitalize(), listcols))
     gdb = txpath+f'\\Taxlots{year}.gdb'
     if year in range(2016, 2018):      
@@ -168,7 +170,7 @@ def readTaxlots(year):
             if year != 2011:
                 txt = 'taxlot__|taxlot_|Taxlots_|TAXLOT_|Taxlot_|taxlots_|TaxLot_'
                 colsel = list(filter(lambda x: re.search(txt, x, re.IGNORECASE), colnms))
-                colsel = unique([col for col in colsel if col not in ['Taxlots_F', 'Taxlots_Map_Taxlo', 'Taxlots_Accnum']])
+                colsel = unique([col for col in colsel if col not in ['Taxlots_F', 'Taxlots_Map_Taxlo', 'Taxlots_Accnum']]) + ['geometry']
                 ncolnms = list(map(lambda x: re.sub(txt, '', x, re.IGNORECASE), colsel))
                 txlot = txlot[colsel]
                 txlot.columns = list(map(lambda x: x.capitalize(), ncolnms))
@@ -203,10 +205,42 @@ def readTaxlots(year):
             else:
                 print(f"check the column names of the {year} taxlots in {lyr}!")
             frames.append(txlot)        
+    elif year == 2009:
+        layers = glob.glob(txpath + f'\\Taxlots{year}\\' + '*.shp')
+        for layer in layers:   
+            c = layer.split('Taxlots2009\\')[1].replace('_tax_09.shp' , '').replace('_Tax_09.shp' , '')
+            cl = [cnt for cnt in cnt_ID.COUNTY.values if (cnt[0:4] == c) or (cnt[0:3] == c)]
+            if cl[0] != 'Wasco': 
+                #print(layer)
+                gdf = gpd.read_file(layer)
+                gdf.loc[:, 'County'] = cl[0]
+                #print(gdf.columns)  
+                if 'ORTaxlot' in gdf.columns:
+                    gdf = gdf[['ORTaxlot', 'County', 'geometry']]
+                    frames.append(gdf)
+                else:
+                    if any([col in gdf.columns for col in ['FIRST_ORTa', 'FIRST_ORTA', 'FIRST_ORMa']]):
+
+                        gdf.rename(columns={'FIRST_ORTa': 'ORTaxlot',
+                                            'FIRST_ORTA': 'ORTaxlot',
+                                            'FIRST_ORMa': 'ORTaxlot'}, 
+                                   inplace=True)
+                    else:
+                        gdf.rename(columns={'SIMAPTAX': 'ORTaxlot',
+                                           'ORTAXLOT': 'ORTaxlot'}, 
+                                   inplace=True)
+                    if 'ORTaxlot' in gdf.columns:
+                        gdf = gdf[['ORTaxlot', 'County', 'geometry']]
+                        frames.append(gdf)
     else:
         print("check the year!")
     gdf = pd.concat(frames, ignore_index=True)
     gdf.loc[:, 'Year'] = year
+    if export:
+        gdf = gdf[~gdf.geometry.isnull()]
+        if isinstance(gdf, pd.DataFrame):
+            gdf = gpd.GeoDataFrame(gdf, geometry="geometry")
+        gdf.to_file(inpath + f'\\GIS\\ORMAP_data\\2009_2015\\ORTaxlots{year}.shp')
     return gdf
 
 def readMapIndex(year):
@@ -1900,9 +1934,12 @@ def read_taxlot(year, mute=True):
     """
     function to read taxlot data
     """
-    txfilepath = os.path.join(txpath, 'Taxlots' + str(year) + '.gdb')
     start = time.time()
-    tx_dt = gpd.read_file(txfilepath, layer='TL_Dissolv')
+    if year < 2016:
+        tx_dt = gpd.read_file(inpath + f'\\GIS\\ORMAP_data\\2009_2015\\ORTaxlots{year}.shp')
+    else:
+        txfilepath = os.path.join(txpath, 'Taxlots' + str(year) + '.gdb') 
+        tx_dt = gpd.read_file(txfilepath, layer='TL_Dissolv')
     end = time.time()
     if not mute:
         print(f'got taxlot data in {year} and it took about {str(round((end - start)/60, 0))} minutes')
@@ -1944,9 +1981,11 @@ def combine_taxlot(exportID=False,
     """
     frames = []
     for year in range(yearstart, yearend):
-        tx_dt = read_taxlot(year)
-        tx_dt['year'] = str(year)
-        frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])
+        if year not in [2010, 2013]:
+            tx_dt = read_taxlot(year)
+            if 'Year' not in tx_dt.columns:
+                tx_dt['Year'] = str(year)
+            frames.append(tx_dt[['Year', 'ORTaxlot', 'geometry']])
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     if exportID:
