@@ -8,7 +8,12 @@ Document the tasks and steps on the wetland delineation work funded by Environme
 
 ## Steps
 
-### Tier 1 - initial match with raw data
+### Steps on the scripts
+
+1. Run the script `notes_review_set7.ipynb`
+
+### Steps on the functions
+#### Tier 1 - initial match with raw data
 
 run `run_Tier1(setID, nm_to_add, all_taxlot)`
 
@@ -20,7 +25,7 @@ Detailed steps:
 5. Run `match_wd_data_with_taxlot`, this will export the first run of matching;
 6. Run `report_unmatched`, this will check how much is matched and export the unmatched records;
 
-### Tier 2 - correct records with parcel ID
+#### Tier 2 - correct records with parcel ID
 
 1) run `run_Tier2_step1(setID, unmatched_df, all_taxlot)`
 2) manual run to get correction notes, `notes_review_setX.ipynb`(X is the set ID)
@@ -34,11 +39,11 @@ Detailed steps:
 5. Review "unmatched_df_SetXXX_r1_N.csv" and create correction notes, can skip the partial taxlots in this step;
 6. Run `correct_unmatched`, `combine_corrected_unmatched` (skip `update_unmatched_df_r2`), `reindex_data`, `match_wd_data_with_taxlot`
 
-### Tier 3 & 4 - digitize the partial and unmatched records
+#### Tier 3 & 4 - digitize the partial and unmatched records
 
 Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb`
 
-### Report
+#### Report
 1. Run `run_Tier3_4_final`(`04_combine_matched_digitized.ipynb`) to combine digitized and matched records, including WD ID;
 2. Review unmatched or issue IDs;
 3. Get the deliverables including the matched or digitized WD records;

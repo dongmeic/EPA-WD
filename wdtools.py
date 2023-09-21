@@ -52,7 +52,7 @@ cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 OR_counties = list(cnt_dict.keys())
-nm2add = [0, 1420, 2143, 2878, 3932, 4370]
+nm2add = [0, 1420, 2143, 2878, 3932, 4370, 4972]
 selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
            'city', 'county', 'site_name', 'site_desc','latitude',
            'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
@@ -1314,14 +1314,7 @@ def review_unmatched_df_r2(df, taxlot, setID, ml, export=True):
     # exclude the unusual county records, e.g., Yamhill and Washington
     df = df[df.county.isin(OR_counties)]
     outdf = df.copy()[['wetdet_delin_number', 'trsqq', 'parcel_id', 'county', 'latitude', 'longitude', 'DecisionLink', 'record_ID', 'IDyear']]
-    outdf.loc[:,'correct_type'], outdf.loc[:,'correction'] = zip(*outdf.apply(lambda row: review_wd_record_w_coord(wd_id = row.wetdet_delin_number, 
-                                                                        county_to_check = row.county, 
-                                                                        trsqq_to_check = row.trsqq, 
-                                                                        parcel_IDs_to_check = row.parcel_id, 
-                                                                        lon = row.longitude, 
-                                                                        lat = row.latitude, 
-                                                                        taxlot = taxlot, 
-                                                                        year = row.IDyear), axis = 1))
+    outdf.loc[:,'correct_type'], outdf.loc[:,'correction'] = zip(*outdf.apply(lambda row: review_wd_record_w_coord(wd_id = row.wetdet_delin_number, county_to_check = row.county, trsqq_to_check = row.trsqq, parcel_IDs_to_check = row.parcel_id, lon = row.longitude,lat = row.latitude,taxlot = taxlot, year = row.IDyear), axis = 1))
     sel = ~outdf.correct_type.isin(['county', 'lot number', 'coordinate', None])
     outdf.loc[sel, 'cor_trsqq'], outdf.loc[sel, 'ORTaxlot'] = zip(*outdf.loc[sel,:].apply(lambda row: correct_trsqq(trsqq_to_check = row.trsqq, 
                                                                                lon = row.longitude,
@@ -1982,10 +1975,13 @@ def combine_taxlot(exportID=False,
     frames = []
     for year in range(yearstart, yearend):
         if year not in [2010, 2013]:
+            print(year)
             tx_dt = read_taxlot(year)
             if 'Year' not in tx_dt.columns:
-                tx_dt['Year'] = str(year)
-            frames.append(tx_dt[['Year', 'ORTaxlot', 'geometry']])
+                tx_dt['year'] = str(year)
+            else:
+                tx_dt.rename(columns={'Year': 'year'}, inplace=True)
+            frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     if exportID:
@@ -2067,10 +2063,10 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
         if update:
             matched = gpd.read_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'))
             ngdf = matched.append(ngdf[selcols], ignore_index = True)
+            ngdf = ngdf[~ngdf.geometry.isnull()]
         if export: 
             # the update will overwrite the first output
-            ngdf[~ngdf.geometry.isnull()][selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), 
-                                                    driver='ESRI Shapefile')  
+            ngdf[selcols].to_file(os.path.join(inpath + f'\\{outfolder}\\', f'matched_records_{setID}.shp'), driver='ESRI Shapefile')  
         return ngdf
     else:
         print('no matched records found')
@@ -2082,7 +2078,7 @@ def report_unmatched(gdf, setID, nm_to_add, mute = True, export=False):
     return the unmatched data after matching the taxlot data
     """
     wd_df = combine_wd_tables(setID, nm_to_add)
-    matched_rID = gdf.record_ID.unique()
+    matched_rID = gdf[~gdf.geometry.isnull()].record_ID.unique()
     unmatched_wd_df = wd_df[~wd_df.record_ID.isin(matched_rID)]
     df = unmatched_wd_df
     IDcol = 'wetdet_delin_number'
