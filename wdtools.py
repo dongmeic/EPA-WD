@@ -34,6 +34,8 @@ from pyproj import Transformer
 from random import sample
 from shapely.geometry import shape
 import glob
+from PIL import Image
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 google_key=json.load(open('config/keys.json'))['google_maps']['APIKEY']
@@ -689,7 +691,7 @@ def writelist(lst, lstnm, setID):
     with open(os.path.join(inpath, f"{setID}_{lstnm}.pkl"), "wb") as f:
             pickle.dump(lst, f)
     
-def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False, wd_id=None, wddf=None):
+def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False, wd_id=None, wddf=None, plot=False, gdf=None):
     """
     loop through the unmatched records and check the original records
     """
@@ -709,7 +711,7 @@ def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False
         i =  wdid_list.index(wd_id)
     for wdID in wdid_list[i+1:]:
         j = wdid_list.index(wdID)
-        print(f'{round(((j/n)*100),1)}% digitized, {n-j} records remained, expected to be done in about {int(((n-j)*0.8)+0.5)} hours...')
+        print(f'{round(((j/n)*100),1)}% digitized, {n-j} records remained, expected to be done in about {int(((n-j)*0.25)+0.5)} hours...')
         print(wdID)
         if idx:
             if df is not None:
@@ -717,7 +719,12 @@ def review_loop_r1(setID=None, wdid_list=None, df=None, partial=False, idx=False
                 print(check_unmatched_r1(wdID = wdID, df = df))
             else:
                 print(f'index = {wdid_list.index(wdID)+1}')
-                print(check_unmatched_r1(wdID = wdID, df = wddf)) 
+                print(check_unmatched_r1(wdID = wdID, df = wddf))
+        if plot:
+            gdf[gdf.wdID == wdID].plot()
+            plt.savefig('SA_plot.jpg')
+            img = Image.open('SA_plot.jpg')
+            img.show()
         user_input = input("Press 'p' to pause or any key to stop...")
         if user_input in ['p', 'P']:
             while True:
