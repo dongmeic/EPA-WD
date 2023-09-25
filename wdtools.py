@@ -101,6 +101,65 @@ with open(os.path.join(inpath, "ParticipCnt.pkl"), "rb") as f:
     cntlst = pickle.load(f)
 pd.options.mode.chained_assignment = None
 
+############################################### QAQC updates ###################################################
+
+def update_QAQC_data(setID, wd, totcol, qaqc_col, export=True):
+    file = outpath + f'\\to_review\\re_mapping_{setID}.txt'
+    with open(file) as f:
+        remapIDs = f.readlines()
+    partialIDs = list(wd[~wd.notes.isnull()].wetdet_delin_number.unique())
+    unmatched = pd.read_csv(outpath+f'\\to_review\\unmatched_df_{setID}_2.csv')
+    unmatchedIDs = list(unmatched.wetdet_delin_number.unique())
+    qaqcIDs = remapIDs[0].split(', ') + partialIDs + unmatchedIDs
+    # count QAQC 
+    qaqc_df = wd[wd.wetdet_delin_number.isin(qaqcIDs)][['county', 'wetdet_delin_number']].groupby(['county']).agg(lambda x: x.nunique()).reset_index().rename(columns={'wetdet_delin_number':'QAQC_count'})
+    # total count
+    total_df = wd[['county', 'wetdet_delin_number']].groupby(['county']).agg(lambda x: x.nunique()).reset_index().rename(columns={'wetdet_delin_number':'total_count'})
+    # update the output
+    gdf = gpd.read_file(inpath+'\\reporting\\WD_Counts.shp')
+    sel = qaqc_df.county.unique()
+    wdcnt_dict = total_df.set_index('county').to_dict(orient='dict')['total_count']
+    qccnt_dict = qaqc_df.set_index('county').to_dict(orient='dict')['QAQC_count']
+    gdf.loc[gdf.County.isin(sel), totcol] = gdf[gdf.County.isin(sel)].County.map(wdcnt_dict)
+    gdf.loc[gdf.County.isin(sel), qaqc_col] = gdf[gdf.County.isin(sel)].County.map(qccnt_dict)
+    gdf.loc[:, 'Tot_ToMap'] =  gdf.P1_ToMap + gdf.P2_ToMap + gdf.P3_ToMap
+    gdf.loc[:, 'Tot_Count'] =  gdf.P1_2017_22 + gdf.P2_2008_16 + gdf.P3_1990_07
+    gdf.loc[:, 'QAQC_Ratio'] = gdf.Tot_ToMap / gdf.Tot_Count
+    gdf.loc[:, 'Auto_Comp'] = gdf.Tot_Count - gdf.Tot_ToMap
+    if export:
+        gdf.to_file(inpath+'\\reporting\\WD_Counts.shp')
+    return gdf
+
+def file_compress(inp_file_names, out_zip_file):
+    """
+    function : file_compress
+    args : inp_file_names : list of filenames to be zipped
+    out_zip_file : output zip file
+    return : none
+    assumption : Input file paths and this code is in same directory.
+    """
+    # Select the compression mode ZIP_DEFLATED for compression
+    # or zipfile.ZIP_STORED to just store the file
+    compression = zipfile.ZIP_DEFLATED
+    print(f" *** Input File name passed for zipping - {inp_file_names}")
+
+    # create the zip file first parameter path/name, second mode
+    print(f' *** out_zip_file is - {out_zip_file}')
+    zf = zipfile.ZipFile(out_zip_file, mode="w")
+    
+    try:
+        for file_to_write in inp_file_names:
+            # Add file to the zip file
+            # first parameter file to zip, second filename in zip
+            print(f' *** Processing file {file_to_write}')
+            zf.write(file_to_write, file_to_write, compress_type=compression)
+
+    except FileNotFoundError as e:
+        print(f' *** Exception occurred during zip process - {e}')
+    finally:
+        # Don't forget to close the file!
+        zf.close()
+
 ############################################### Taxlot Review ###################################################
 def removeCountyNm(x, toRemove):
     """
@@ -1911,23 +1970,19 @@ def combine_wd_tables(setID, nm_to_add, raw=True):
             wd_dt = pd.read_excel(datafile, sheet_name=xl.sheet_names[1])
             frames.append(wd_dt)
         wd_df = pd.concat(frames, ignore_index=True)
+        # this creates unique IDs for all the records in the same set
+        wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1) 
+        wd_df.loc[:, 'record_ID'] = wd_df.copy().loc[:, 'record_ID'] + nm_to_add
+        selectedID = wd_df.parcel_id.astype(str) != 'nan'
+        wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
+        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: x.year)
+        # get year from the wd ID 
+        wd_df.loc[:, 'IDyear'] = wd_df.wetdet_delin_number.apply(lambda x: x[2:6]) 
+        selectedID = wd_df.parcel_id.astype(str) != 'nan'
+        wd_df.loc[selectedID, 'missinglot'] = wd_df[selectedID].parcel_id.apply(lambda x: without_lots(x))
     else:
         wd_df = pd.read_csv(wdpath+f'\\Corrected_by_Set\\{setID}.csv')
-  
-    # this creates unique IDs for all the records in the same set
-    wd_df.loc[:, 'record_ID'] = range(1, wd_df.shape[0] + 1) 
-    wd_df.loc[:, 'record_ID'] = wd_df.copy().loc[:, 'record_ID'] + nm_to_add
-    selectedID = wd_df.parcel_id.astype(str) != 'nan'
-    wd_df.loc[selectedID, 'notes'] = wd_df[selectedID]['parcel_id'].apply(lambda x: make_notes(x))
-    # get year from the receive date
-    if raw:
-        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: x.year)
-    else:
-        wd_df.loc[:, 'recyear'] = wd_df.received_date.apply(lambda x: int(x.split('-')[0]))
-    # get year from the wd ID 
-    wd_df.loc[:, 'IDyear'] = wd_df.wetdet_delin_number.apply(lambda x: x[2:6]) 
-    selectedID = wd_df.parcel_id.astype(str) != 'nan'
-    wd_df.loc[selectedID, 'missinglot'] = wd_df[selectedID].parcel_id.apply(lambda x: without_lots(x))
+    
     return wd_df
 
 def read_taxlot(year, mute=True):

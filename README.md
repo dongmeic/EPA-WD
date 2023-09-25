@@ -10,7 +10,29 @@ Document the tasks and steps on the wetland delineation work funded by Environme
 
 ### Steps on the scripts
 
-1. Run the script `notes_review_set7.ipynb`
+1. Run the script `run_and_review_set*`
+
+Start with combing tables and scanning the TRSQQ (correct the errors first if necessary), then run the function `run_Tier1` to get the initial matches. Run the function `run_Tier2_step1` to get the notes for the corrections in the next step. Pause and move to the next step.
+
+2. Run the script `notes_review_set*.ipynb`
+
+This step basically creates the notes to correct the WD records with coordinates. Correct the WD tables after this or next step using the script [`08_correct_WD_records`](https://github.com/dongmeic/EPA-WD/blob/main/08_correct_WD_records.ipynb). It is considered as Tier2 Step2. 
+
+3. Continue the script `run_and_review_set*`
+
+Run the function `run_Tier2_step3` to get the additional matches. 
+
+4. Run the script `digitize_set*_loop`
+
+First, review the matched records without notes on the parcel ids such as partial taxlots and roads using the function `review_loop_r1` to identify the QAQC records. Then update the [application](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) with the QAQC records, matched records without notes, unmatched records, and issue IDs. The data can be updated by replacing the [feature layer](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544). The next step is digitizing the unmatched or partially-matched records. It is considered as Tier 3 and 4 with feedback on errata and issue IDs for DSL.  
+
+5. Run the script [`04_combine_matched_digitized`](https://github.com/dongmeic/EPA-WD/blob/main/04_combine_matched_digitized.ipynb)
+
+This step applies `run_Tier3_4_final` and export the first version of final WD SA data.
+
+6. Run the script [`09_add_issue_IDs_to_set`](https://github.com/dongmeic/EPA-WD/blob/012078acc20779062fbe918a5974ba3c11775ceb/09_add_issue_IDs_to_set.ipynb)
+
+This step finalizes the WD SA data with issue IDs. 
 
 ### Steps on the functions
 #### Tier 1 - initial match with raw data
