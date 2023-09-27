@@ -24,7 +24,9 @@ Run the function `run_Tier2_step3` to get the additional matches.
 
 4. Run the script `digitize_set*_loop`
 
-First, review the matched records without notes on the parcel ids such as partial taxlots and roads using the function `review_loop_r1` to identify the QAQC records. Then update the [application](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) with the QAQC records, matched records without notes, unmatched records, and issue IDs. The data can be updated by replacing the [feature layer](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544). The next step is digitizing the unmatched or partially-matched records. It is considered as Tier 3 and 4 with feedback on errata and issue IDs for DSL.  
+First, review the matched records without notes on the parcel ids such as partial taxlots and roads using the function `review_loop_r1` to identify the QAQC records. Then update the [application](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) with the QAQC records, matched records without notes, unmatched records, and issue IDs. The data can be updated by replacing the [feature layer](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544). The next step is digitizing the unmatched or partially-matched records. It is considered as Tier 3 and 4 with feedback on errata and issue IDs for DSL. 
+
+When start digitizing, create a file geodatabase 'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\GIS\ArcGIS Pro Project\DataReview\Set*.gdb' and two feature classes 'Set*_wo_lot' and 'Set*_partial'. The notes 'Set*_edited.txt' and 'Set*_edited_1.txt' in the folder 'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\matched' are created to document the edited taxlots in the shapefile 'matched_records_Set*_edited.shp' or edited taxlots in the file geodatabase. 
 
 5. Run the script [`04_combine_matched_digitized`](https://github.com/dongmeic/EPA-WD/blob/main/04_combine_matched_digitized.ipynb)
 
