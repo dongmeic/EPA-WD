@@ -83,7 +83,7 @@ Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb
 7. Update QAQC counts by excluding the completed records.
 
 #### Report
-The script `initial_status_report.ipynb` was initially applied to report the progress. 
+The script `initial_status_report.ipynb` was initially applied to report the progress. The reoprt step is later explained in the section [Update the QAQC progress by county and year](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) in this document. 
 
 ## Notes
 
