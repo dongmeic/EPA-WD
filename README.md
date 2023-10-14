@@ -74,11 +74,16 @@ Detailed steps:
 
 Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb`
 
-#### Report
 1. Run `run_Tier3_4_final`(`04_combine_matched_digitized.ipynb`) to combine digitized and matched records, including WD ID;
 2. Review unmatched or issue IDs;
 3. Get the deliverables including the matched or digitized WD records;
-4. Report the issues for the final digitizing work needed.
+4. Report the issues to DSL for the final digitizing work needed;
+5. Complete the final digitizing after receiving DSL responses;
+6. Rerun `run_Tier3_4_final` or run `09_add_issue_IDs_to_set.ipynb` accordingly;
+7. Update QAQC counts by excluding the completed records.
+
+#### Report
+The script `initial_status_report.ipynb` was initially applied to report the progress. 
 
 ## Notes
 
@@ -94,6 +99,6 @@ DSL requested data attritutes and test data for their database development tests
 
 Run `join_WD_with_SA_by_taxmap` in `10_review_data_from_all_sets` to get the deliverable.
 
-## [update the QAQC progress by county and year](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06)
+## [Update the QAQC progress by county and year](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06)
 
 The original table was prepared using the script [organize_data_for_QAQC_reporting.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/organize_data_for_QAQC_reporting.ipynb) and updated using the script [update_QAQC_data_on_the_application.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/update_QAQC_data_on_the_application.ipynb). Basically, we need to update the data "[Wetland Delineation and Determination Counts](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544)" (L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\reporting\WD_Counts.zip).
