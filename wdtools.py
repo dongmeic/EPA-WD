@@ -104,15 +104,17 @@ pd.options.mode.chained_assignment = None
 ############################################### QAQC updates ###################################################
 
 def update_QAQC_data(setID, wd, totcol, qaqc_col, export=True):
-    file = outpath + f'\\to_review\\re_mapping_{setID}.txt'
-    with open(file) as f:
-        remapIDs = f.readlines()
-    partialIDs = list(wd[~wd.notes.isnull()].wetdet_delin_number.unique())
-    unmatched = pd.read_csv(outpath+f'\\to_review\\unmatched_df_{setID}_2.csv')
-    unmatchedIDs = list(unmatched.wetdet_delin_number.unique())
-    issues = pd.read_excel(outpath + f'\\to_review\\{setID}_Mapping_Issues.xlsx')
-    issueIDs = list(issues.wetdet_delin_number.unique())
-    qaqcIDs = remapIDs[0].split(', ') + partialIDs + unmatchedIDs + issueIDs
+#     file = outpath + f'\\to_review\\re_mapping_{setID}.txt'
+#     with open(file) as f:
+#         remapIDs = f.readlines()
+#     partialIDs = list(wd[~wd.notes.isnull()].wetdet_delin_number.unique())
+#     unmatched = pd.read_csv(outpath+f'\\to_review\\unmatched_df_{setID}_2.csv')
+#     unmatchedIDs = list(unmatched.wetdet_delin_number.unique()) 
+#     issues = pd.read_excel(outpath + f'\\to_review\\{setID}_Mapping_Issues.xlsx')
+#     issueIDs = list(issues.wetdet_delin_number.unique())
+#     qaqcIDs = remapIDs[0].split(', ') + partialIDs + unmatchedIDs + issueIDs
+    mapped = gpd.read_file(f'{outpath}//final//mapped_wd_{setID}.shp')
+    qaqcIDs = wd[~wd.wetdet_delin_number.isin(mapped.wdID.unique())].wetdet_delin_number.unique()
     # count QAQC 
     qaqc_df = wd[wd.wetdet_delin_number.isin(qaqcIDs)][['county', 'wetdet_delin_number']].groupby(['county']).agg(lambda x: x.nunique()).reset_index().rename(columns={'wetdet_delin_number':'QAQC_count'})
     # total count
