@@ -196,6 +196,8 @@ def readGeoData(layer_file):
 
         #Convert to geodataframe
         gdf = gpd.GeoDataFrame.from_features(collection)
+#     if gdf.crs is None:
+#         gdf.crs = "epsg:2992"
     return gdf
 
 def readTaxlots(year, ORTxt_Only=False, export=False):
@@ -208,7 +210,7 @@ def readTaxlots(year, ORTxt_Only=False, export=False):
     else:
         listcols = ['County', 'Town', 'TownPart', 'TownDir','Range','RangePart','RangeDir', 'SecNumber', 'Qtr', 'QtrQtr', 'Anomaly', 'MapSufType', 'MapNumber', 'ORMapNum', 'Taxlot','MapTaxlot', 'ORTaxlot', 'geometry']
     selcols = list(map(lambda x: x.capitalize(), listcols))
-    gdb = txpath+f'\\Taxlots{year}.gdb'
+    gdb = inpath+f'\\GIS\\ORMAP_data\\raw\\Taxlots{year}.gdb'
     if year in range(2016, 2018):      
         txlot = gpd.read_file(gdb, layer='Taxlots')
         if all([col in txlot.columns for col in listcols]):
@@ -227,6 +229,7 @@ def readTaxlots(year, ORTxt_Only=False, export=False):
         for lyr in sorted(lyrsel):
             print(lyr)
             txlot = gpd.read_file(gdb, layer=lyr)
+            txlot = txlot.to_crs(epsg=2992)
             lst = list(map(lambda x: re.sub(r'[0-9]', '', x), txlot.columns))
             colnms = list(map(lambda x:removeCountyNm(x, toRemove), lst))
             txlot.columns = colnms
@@ -248,17 +251,44 @@ def readTaxlots(year, ORTxt_Only=False, export=False):
             txlot.columns = listcols
             frames.append(txlot)
     elif year == 2012:
-        dir_list = os.listdir(txpath + f'\\Taxlots{year}')
-        lyrs = [lyr for lyr in dir_list if lyr not in ['Umatilla', 'Lane']]
+        dir_list = os.listdir(inpath+f'\\GIS\\ORMAP_data\\raw\\Taxlots{year}')
+        # Umatilla and Lane don't have the complete required information
+        lyrs = [lyr for lyr in dir_list if lyr not in ['Umatilla']]
         for lyr in lyrs:
             print(lyr)
-            path = txpath + f'\\Taxlots{year}\\{lyr}'
+            path = inpath+f'\\GIS\\ORMAP_data\\raw\\Taxlots{year}\\{lyr}'
             txt = 'taxlot|Taxlot'
             files = os.listdir(path)
             filelst = list(filter(lambda x: re.search(txt, x, re.IGNORECASE), files))
             filesel = [file for file in filelst if 'Taxlots' not in file]
             file = filesel[0].split('.')[0]
             txlot = readGeoData(path+f'\\{file}.shp')
+            if lyr == 'Lane':
+                txlot['TownDir'] = txlot.ORTaxlot.apply(lambda x: separate_numbers_letters(str(x))[1][0])
+            if txlot.crs is None:
+                if lyr in ['Baker', 'Gilliam', 'Hood River', 'Jefferson', 'Columbia', 'Lincoln', 'Marion', 'Polk', 'Tilamook', 
+                          'Union', 'Wasco', 'Jackson', 'Wheeler', 'Yamhill']:
+                    txlot = txlot.set_crs('epsg:2913')
+                    txlot = txlot.to_crs('epsg:2992')
+                elif lyr in ['crook', 'curry', 'Josephine', 'Klamath', 'Lake', 'Lane']:
+                    txlot = txlot.set_crs('epsg:2914')
+                    txlot = txlot.to_crs('epsg:2992')
+                elif lyr in ['Benton', 'Clackamas', 'Clatsop', 'Linn']:
+                    txlot = txlot.set_crs('epsg:2994')
+                    txlot = txlot.to_crs('epsg:2992')
+                elif lyr in ['Deschutes', 'Harney', 'Jackson']:
+                    txlot = txlot.set_crs('epsg:2270')
+                    txlot = txlot.to_crs('epsg:2992')
+                elif lyr == 'Umatilla':
+                    txlot = txlot.set_crs('epsg:32126')
+                    txlot = txlot.to_crs('epsg:2992')
+                elif lyr in ['Multnomah', 'Washington']:
+                    txlot = txlot.set_crs('epsg:102326')
+                    txlot = txlot.to_crs('epsg:2992')
+                else:
+                    print(f'check the projected coordinate system for {lyr} in 2012')
+            else:
+                txlot = txlot.to_crs('epsg:2992')
             if all([col in txlot.columns for col in listcols]):
                 txlot = txlot[listcols]
             elif all([col in list(map(lambda x: x.capitalize(), txlot.columns)) for col in selcols]):
@@ -269,13 +299,14 @@ def readTaxlots(year, ORTxt_Only=False, export=False):
                 print(f"check the column names of the {year} taxlots in {lyr}!")
             frames.append(txlot)        
     elif year == 2009:
-        layers = glob.glob(txpath + f'\\Taxlots{year}\\' + '*.shp')
+        layers = glob.glob(inpath+f'\\GIS\\ORMAP_data\\raw\\Taxlots{year}\\' + '*.shp')
         for layer in layers:   
             c = layer.split('Taxlots2009\\')[1].replace('_tax_09.shp' , '').replace('_Tax_09.shp' , '')
             cl = [cnt for cnt in cnt_ID.COUNTY.values if (cnt[0:4] == c) or (cnt[0:3] == c)]
             if cl[0] != 'Wasco': 
                 #print(layer)
                 gdf = gpd.read_file(layer)
+                gdf = gdf.to_crs(epsg=2992)
                 gdf.loc[:, 'County'] = cl[0]
                 #print(gdf.columns)  
                 if 'ORTaxlot' in gdf.columns:
@@ -302,7 +333,7 @@ def readTaxlots(year, ORTxt_Only=False, export=False):
     if export:
         gdf = gdf[~gdf.geometry.isnull()]
         if isinstance(gdf, pd.DataFrame):
-            gdf = gpd.GeoDataFrame(gdf, geometry="geometry")
+            gdf = gpd.GeoDataFrame(gdf, crs="EPSG:2992", geometry="geometry")
         gdf.to_file(inpath + f'\\GIS\\ORMAP_data\\2009_2015\\ORTaxlots{year}.shp')
     return gdf
 
@@ -945,6 +976,19 @@ def merge_single_partial_file(setID, wIDlist, from_set=True):
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     return gdf
 
+def read_text_file(file):
+    """
+    read text file to get a list of WD IDs
+    """
+    if os.path.exists(file):
+        with open(file) as f:
+            IDs = f.readlines()
+            if len(IDs) == 1:
+                IDs = IDs[0].split(', ')
+    else:
+        IDs = []
+    return IDs
+
 def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     """
     Combine the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
@@ -978,17 +1022,11 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     issues = pd.read_csv(os.path.join(inpath, "output", "to_review", f"{setID}_Mapping_Issues.csv"))
     # exclude the ones that have issues
     issueIDs = list(issues.wetdet_delin_number.unique())
-    file = outpath+f"\\matched\\{setID}_reviewed.txt"
-    if os.path.exists(file):
-        with open(file) as f:
-            reviewedIDs = f.readlines()
-        issueIDs = [iID for iID in issueIDs if iID not in reviewedIDs]
-    file = outpath+f"\\matched\\{setID}_not_mapped.txt"
-    if os.path.exists(file):
-        with open(file) as f:
-            withdrawnIDs = f.readlines()
-            data2 = data2[~data2.wdID.isin(withdrawnIDs)]
-        issueIDs = issueIDs + withdrawnIDs
+    reviewedIDs = read_text_file(file = outpath+f"\\matched\\{setID}_reviewed.txt")
+    issueIDs = [iID for iID in issueIDs if iID not in reviewedIDs]
+    withdrawnIDs = read_text_file(file = outpath+f"\\matched\\{setID}_not_mapped.txt")
+    data2 = data2[~data2.wdID.isin(withdrawnIDs)]
+    issueIDs = issueIDs + withdrawnIDs
     matched_gdf = matched[~matched.wdID.isin(excluded+issueIDs)]
     matched_gdf['code'] = 0
     # merge matched and digitized/edited
@@ -1001,11 +1039,8 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     unmatchedIDs = [wdID for wdID in wd.wetdet_delin_number.unique() if wdID not in final_gdf.wdID.unique()]
     toCheck = [ID for ID in unmatchedIDs if ID not in issueIDs]
     digitized_nIDs = len(editedIDs) + len(dat.wdID.unique()) + len(wo_lot.wdID.unique())
-    file = outpath+f"\\matched\\{setID}_edited_1.txt"
-    if os.path.exists(file):
-        with open(file) as f:
-            editedIDs1 = f.readlines()
-        final_gdf.loc[final_gdf.wdID.isin(editedIDs1), 'code'] = 1
+    editedIDs1 = read_text_file(file = outpath+f"\\matched\\{setID}_edited_1.txt")
+    final_gdf.loc[final_gdf.wdID.isin(editedIDs1), 'code'] = 1
     if export:
         final_gdf.to_file(os.path.join(inpath, "output", "final", f"mapped_wd_{setID}.shp"), index=False)
     return final_gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
@@ -1021,16 +1056,10 @@ def run_Tier3_4_final(setID, nm_to_add):
     matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     partial = gpd.read_file(revpath, layer=f'{setID}_partial')
-    with open(outpath+f'\\matched\\{setID}_edited.txt') as f:
-        edited = f.readlines()
-    file = outpath+f"\\matched\\{setID}_edited_1.txt"
-    if os.path.exists(file):
-        with open(file) as f:
-            editedIDs1 = f.readlines()
+    edited = read_text_file(outpath+f'\\matched\\{setID}_edited.txt')
+    editedIDs1 = read_text_file(file = outpath+f"\\matched\\{setID}_edited_1.txt")
     edited = edited + editedIDs1
-    gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs = combine_matched_digitized(setID=setID, 
-                                                                                     editedIDs=edited[0].split(", "), 
-                                                                                     nm_to_add=nm_to_add)
+    gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs = combine_matched_digitized(setID=setID, editedIDs=edited, nm_to_add=nm_to_add)
     end = time.time()
     print(f'it took {round((end - start)/60, 0)} minutes to complete')
     return gdf, toCheck, matched_gdf, digitized_nIDs, unmatchedIDs, issueIDs
@@ -1591,10 +1620,14 @@ def run_Tier2_step1(setID, unmatched_df, all_taxlot):
     """
     split unmatched records
     """
-    r1_df, r2_df = split_unmatched_df(unmatched_df, ml='N', setID=setID)
-    rev_r2 = review_unmatched_df_r2(r2_df, all_taxlot, setID, ml='N', export=True)
-    taxlots_to_review = get_taxlot_to_check_r2(rev_r2, all_taxlot, setID, ml='N')
-    return r1_df, r2_df
+    if 'N' not in unmatched_df.missinglot.unique():
+        print("All unmatched records are without taxlots, skip running Tier 2 Step 1...")
+        return None, None
+    else:
+        r1_df, r2_df = split_unmatched_df(unmatched_df, ml='N', setID=setID)
+        rev_r2 = review_unmatched_df_r2(r2_df, all_taxlot, setID, ml='N', export=True)
+        taxlots_to_review = get_taxlot_to_check_r2(rev_r2, all_taxlot, setID, ml='N')
+        return r1_df, r2_df
 
 def run_Tier2_step3(r1_df, r2_df, setID, nm_to_add, wd, all_taxlot):
     """
@@ -1992,10 +2025,10 @@ def read_taxlot(year, mute=True):
     function to read taxlot data
     """
     start = time.time()
+    txfilepath = os.path.join(txpath, 'Taxlots' + str(year) + '.gdb')
     if year < 2016:
-        tx_dt = gpd.read_file(inpath + f'\\GIS\\ORMAP_data\\2009_2015\\ORTaxlots{year}.shp')
-    else:
-        txfilepath = os.path.join(txpath, 'Taxlots' + str(year) + '.gdb') 
+        tx_dt = gpd.read_file(txfilepath, layer=f'Taxlots{year}')
+    else: 
         tx_dt = gpd.read_file(txfilepath, layer='TL_Dissolv')
     end = time.time()
     if not mute:
@@ -2032,13 +2065,14 @@ def get_record_dict(setID, wd_df):
 
 def combine_taxlot(exportID=False, 
                    yearstart=2016, 
-                   yearend=2023):
+                   yearend=2023,
+                   skips=[2010, 2013]):
     """
     combine taxlots from all years
     """
     frames = []
     for year in range(yearstart, yearend):
-        if year not in [2010, 2013]:
+        if year not in skips:
             print(year)
             tx_dt = read_taxlot(year)
             if 'Year' not in tx_dt.columns:

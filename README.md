@@ -6,6 +6,10 @@ Document the tasks and steps on the wetland delineation work funded by Environme
 1. [Oregon Cadastral Data Exchange Standard](https://www.oregon.gov/geo/standards/Cadastral%20Standard%20v3.2.pdf);
 2. [Oregon Cadastral Map System](https://digital.osl.state.or.us/islandora/object/osl%3A981082/datastream/OBJ/view)
 
+## ORMAP Taxlots
+
+The ORMAP taxlots from 2016 to 2023 are ready to use. However, the ORMAP taxlots before 2016 require data cleaning to keep the schema consistent. Data from some years in some counties miss the key information such as ORTaxlot, MapTaxlot, or ORMapNum and Taxlot, and is considerated unusuable. Saving data in geodatabase is easier for better ArcGIS Pro performance. 
+
 ## Steps
 
 ### Steps on the scripts
@@ -23,6 +27,7 @@ This step basically creates the notes to correct the WD records with coordinates
 Run the function `run_Tier2_step3` to get the additional matches. 
 
 4. Run the script `digitize_set*_loop`
+
 
 First, review the matched records without notes on the parcel ids such as partial taxlots and roads using the function `review_loop_r1` to identify the QAQC records. Then update the [application](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) with the QAQC records, matched records without notes, unmatched records, and issue IDs. The data can be updated by replacing the [feature layer](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544). The next step is digitizing the unmatched or partially-matched records. It is considered as Tier 3 and 4 with feedback on errata and issue IDs for DSL. 
 
@@ -50,6 +55,8 @@ Detailed steps:
 6. Run `report_unmatched`, this will check how much is matched and export the unmatched records;
 
 #### Tier 2 - correct records with parcel ID
+
+This step can be skipped if there is not unmatched data with specific parcel IDs. 
 
 1) run `run_Tier2_step1(setID, unmatched_df, all_taxlot)`
 2) manual run to get correction notes, `notes_review_setX.ipynb`(X is the set ID)
@@ -86,3 +93,7 @@ DSL requested data attritutes and test data for their database development tests
 ### Study area polygons
 
 Run `join_WD_with_SA_by_taxmap` in `10_review_data_from_all_sets` to get the deliverable.
+
+## [update the QAQC progress by county and year](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06)
+
+The original table was prepared using the script [organize_data_for_QAQC_reporting.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/organize_data_for_QAQC_reporting.ipynb) and updated using the script [update_QAQC_data_on_the_application.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/update_QAQC_data_on_the_application.ipynb). Basically, we need to update the data "[Wetland Delineation and Determination Counts](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544)" (L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\reporting\WD_Counts.zip).
