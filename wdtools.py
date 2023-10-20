@@ -995,7 +995,7 @@ def combine_matched_digitized(setID, editedIDs, nm_to_add, export=True):
     """
     Combine the edited matched records, digitized partial taxlots, taxlots without lot IDs, and the list of issue IDs
     """
-    revpath = inpath + f'\GIS\ArcGIS Pro Project\DataReview\{setID}.gdb'
+    revpath = inpath + f'\\GIS\\ArcGIS Pro Project\\DataReview\\{setID}.gdb'
     # get separated feature files
     mapped0 = [lyr for lyr in fiona.listlayers(revpath) if (lyr not in [f'{setID}_wo_lot', f'{setID}_partial']) and ('L' not in lyr)]
     matched = gpd.read_file(inpath + f'\\output\matched\matched_records_{setID}_edited.shp')
