@@ -1880,16 +1880,16 @@ def convert_trsqq(x):
     convert township, range, section, and quarter-quarter to the taxlot id format
     """
     #print(x)
-    x = '{:<08s}'.format(x)
+    x1 = '{:<08s}'.format(x)
     #x = re.sub("V|X|Y|Z", "", x)
-    xt = get_tr_code(x, code='t') + get_tr_code(x, code='r') + get_s_code(x) + get_qq_code(x)
+    xt = get_tr_code(x1, code='t') + get_tr_code(x1, code='r') + get_s_code(x) + get_qq_code(x1)
     return xt[:16]
 
 def create_ORTaxlot(cnt_code, trsqq, lot):
     """
     create the taxlot id based on the county code, township, range, section, and lot number
     """
-    #print(f'County {cnt_code}, TRSQQ {trsqq}, Lot {lot}')
+    print(f'County {cnt_code}, TRSQQ {trsqq}, Lot {lot}')
     part1 = str(int(cnt_code)).zfill(2) + convert_trsqq(trsqq) 
     taxlotID = part1 + '--' + ('000000000' + lot)[-9:]
     tid_dst_2 = [x[-len(lot):] for x in tid_dst_1]    
@@ -2068,7 +2068,8 @@ def get_record_dict(setID, wd_df):
 def combine_taxlot(exportID=False, 
                    yearstart=2016, 
                    yearend=2023,
-                   skips=[2010, 2013]):
+                   skips=[2010, 2013],
+                   all_counties=False):
     """
     combine taxlots from all years
     """
@@ -2076,12 +2077,23 @@ def combine_taxlot(exportID=False,
     for year in range(yearstart, yearend):
         if year not in skips:
             print(year)
-            tx_dt = read_taxlot(year)
-            if 'Year' not in tx_dt.columns:
-                tx_dt['year'] = str(year)
+            if all_counties:
+                tx_dt = read_taxlot(year)
+                if 'Year' not in tx_dt.columns:
+                    tx_dt['year'] = str(year)
+                else:
+                    tx_dt.rename(columns={'Year': 'year'}, inplace=True)
+                frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])
             else:
-                tx_dt.rename(columns={'Year': 'year'}, inplace=True)
-            frames.append(tx_dt[['year', 'ORTaxlot', 'geometry']])
+                for county in counties:
+                    tx_dt = gpd.read_file(fr'{inpath}\GIS\ORMAP_data\ORMAP_Taxlot_Years\Taxlots{year}.gdb',
+                                          layer=county)
+                    tx_dt.columns = list(map(lambda x: x.lower(), tx_dt.columns))
+                    if 'Year' not in tx_dt.columns:
+                        tx_dt['year'] = str(year)
+                    tx_dt.rename(columns={'ortaxlot': 'ORTaxlot'}, inplace=True)
+                    tx_dt['county'] = county
+                    frames.append(tx_dt[['year', 'county', 'ORTaxlot', 'geometry']])                 
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     if exportID:
