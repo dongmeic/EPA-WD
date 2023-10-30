@@ -28,7 +28,7 @@ Run the function `run_Tier2_step3` to get the additional matches. Skip this step
 
 4. QAQC 
 
-
+The QAQC step reviews the matched SA polygons and the WD decision link on the study area, and check whether they are matched and organize questions for DSL if the decision link is unclear. 
 
 6. Run the script `digitize_set*_loop`
 
