@@ -54,7 +54,7 @@ cnt_ID = pd.read_excel(inpath+'\\notes\\CNT_Code.xlsx')
 cnt_dict = dict(zip(cnt_ID.COUNTY, cnt_ID.ID))
 trsqq_correction_dict = dict(zip(list(range(0, 6)), ['township number', 'township direction', 'range number', 'range direction', 'section number', 'QQ']))
 OR_counties = list(cnt_dict.keys())
-nm2add = [0, 1420, 2143, 2878, 3932, 4370, 4972]
+nm2add = [0, 1420, 2143, 2878, 3932, 4370, 4972, 5402]
 selectedvars = ['wetdet_delin_number', 'trsqq', 'parcel_id','address_location_desc', 
            'city', 'county', 'site_name', 'site_desc','latitude',
            'longitude', 'DocumentName', 'DecisionLink','is_batch_file',
@@ -490,7 +490,7 @@ def read_all_mapIdx(exportID=False):
     for year in range(yearstart, yearend):
         mapIdx_dt = read_mapIdx(year)
         mapIdx_dt['year'] = str(year)
-        frames.append(mapIdx_dt[['year', 'ORMapNum', 'geometry']])
+        frames.append(mapIdx_dt[['year', 'MapNumber', 'ORMapNum', 'geometry']])
     df = pd.concat(frames, ignore_index=True)
     gdf = gpd.GeoDataFrame(df, crs="EPSG:2992", geometry='geometry')
     if exportID:
@@ -574,15 +574,17 @@ def split_WD_to_records(df, gdf, wdID, mapindex, taxlots, review=False):
         out.reset_index(drop=True, inplace=True)
         return out
 
-def split_WD_to_taxmaps(df, gdf, wdID, mapindex):
+def split_WD_to_taxmaps(gdf, wdID, mapindex):
     """
     this function splits the WD SA ploygons by taxmap
     gdf is the geodataframe that contains the selected WD ID
     mapindex is the taxmap geodataframe of the year
     """
-    selmid = df[df.wetdet_delin_number==wdID].ORMapNum.unique()
+    #selmid = df[df.wetdet_delin_number==wdID].ORMapNum.unique()
     gdf = gdf[gdf.wdID==wdID]
-    selmapindex = mapindex[['ORMapNum','geometry']][mapindex.ORMapNum.isin(selmid)]
+    area = gdf.area.values[0]
+    #selmapindex = mapindex[['ORMapNum','geometry']][mapindex.ORMapNum.isin(selmid)]
+    selmapindex = mapindex[['ORMapNum','geometry']]
     try:
         inter = gpd.overlay(gdf, selmapindex, 
                     how='intersection', keep_geom_type=False)
@@ -593,6 +595,9 @@ def split_WD_to_taxmaps(df, gdf, wdID, mapindex):
     inter = inter.dissolve('ORMapNum')
     inter['ORMapNum'] = inter.index
     inter.reset_index(drop=True, inplace=True)
+    inter.loc[:, 'Area'] = inter.area/area
+    inter = inter[inter.Area > 0.009]
+    inter.drop(columns=['Area'], inplace=True)
     return inter
 
 def split_taxmap_to_records(df, gdf, trsqq, taxlots):
@@ -682,23 +687,30 @@ def get_all_SA(num):
                    ignore_index=True)
     return sa_gdf
 
-def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=True):
+def join_WD_with_SA_by_taxmap(df, gdf, mapindex):
     """
     df is the corrected WD dataframe from get_all_wd
     gdf is the SA polygons from get_all_SA
     mapindex is the combined taxmaps from read_all_mapIdx
     """
-    frames = []
+    frames0 = [] # for the exact matches
+    frames1 = [] # for the unmatched SA geodataframe split by taxmap
+    frames2 = [] # for the unmatched WD dataframe
+    frames3 = [] # for the unmatched WD dataframe with a different ORMapNum from the SA geodataframe
+    frames4 = [] # for the unmatched SA geodataframe split by taxmap with a different ORMapNum from the WD dataframe
     wdlist = gdf.wdID.unique()
     df['ORMapNum'] = df[['county', 'trsqq']].apply(lambda row: create_ORMapNm(ct_nm=row.county, trsqq=row.trsqq), axis = 1)
+    df.rename(columns={'wetdet_delin_number':'wdID'}, inplace=True)
     for wid in wdlist:
         #print(wid)
-        df_s = df[df.wetdet_delin_number==wid]
+        df_s = df[df.wdID==wid]
         gdf_s = gdf[gdf.wdID==wid]
-        ORmn = df_s.ORMapNum.values
+        #ORmn = df_s.ORMapNum.values
         yr = wid[2:6]
-        mapIdx = mapindex[(mapindex.ORMapNum.isin(ORmn)) & (mapindex.year==yr)]
-        exp_gdf = split_WD_to_taxmaps(df=df_s, gdf=gdf_s, wdID=wid, mapindex=mapIdx)
+        mapindex.loc[:, 'YDiff'] = abs(mapindex.year.astype(int) - int(yr))
+        #mapIdx = mapindex[(mapindex.ORMapNum.isin(ORmn)) & (mapindex.YDiff==np.min(mapindex.YDiff.values))]
+        mapIdx = mapindex[mapindex.YDiff==np.min(mapindex.YDiff.values)]
+        exp_gdf = split_WD_to_taxmaps(gdf=gdf_s, wdID=wid, mapindex=mapIdx)
         exp_gdf['lat'], exp_gdf['lon'] = transformer.transform(exp_gdf.representative_point().x, exp_gdf.representative_point().y)
         ndf = df_s.drop_duplicates(subset='ORMapNum')
         ndf.drop(columns=['parcel_id','site_id','record_ID'], inplace=True)
@@ -708,18 +720,95 @@ def join_WD_with_SA_by_taxmap(df, gdf, mapindex, outnm='wd_mapped_data', export=
         ri_df = g.apply(lambda x: '; '.join(x.record_ID.astype(str).unique())).to_frame(name='record_ID').reset_index()
         sdf = pd.concat([ri_df, pi_df, si_df], axis=1)
         fdf = ndf.merge(sdf, on='ORMapNum')
-        exp_gdf = fdf.merge(exp_gdf[['code','ORMapNum','lat','lon','geometry']], on='ORMapNum')
-        frames.append(exp_gdf)
-    sa_df = pd.concat(frames, ignore_index=True)
-    sa_gdf = gpd.GeoDataFrame(sa_df, geometry='geometry')
-    if export:
-        sa_gdf=sa_gdf.rename(columns=coldict)
-        try:
-            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
-        except RuntimeError:
-            sa_gdf['geometry'] = sa_gdf.geometry.buffer(0)
-            sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
-    return sa_gdf
+        # bv1 - the first list of boolean values, to check whether there is any match
+        # bv2 - the second list of boolean values, to check whether there is any unmatch
+        bv1 = [val in fdf.ORMapNum.values for val in exp_gdf.ORMapNum.values]
+        bv2 = [val not in exp_gdf.ORMapNum.values for val in fdf.ORMapNum.values]
+        colnms = ['wdID', 'trsqq', 'address_location_desc', 'city', 'county', 'site_name',
+       'site_desc', 'latitude', 'longitude', 'DocumentName', 'DecisionLink',
+       'is_batch_file', 'status_name', 'received_date', 'response_date',
+       'reissuance_response_date', 'project_id', 'ORMapNum', 'record_ID',
+       'parcel_id', 'site_id', 'geometry', 'lat', 'lon', 'code', 'match']
+        if fdf.shape[0] == 1:
+            fdf.drop(columns=['ORMapNum'], inplace=True)
+            exp_gdf = fdf.merge(exp_gdf, on='wdID', how='right')
+            exp_gdf.loc[:, 'match'] = 0 
+            frames0.append(exp_gdf[colnms])
+        elif len(exp_gdf.ORMapNum.values) >= len(fdf.ORMapNum.values): 
+            ORMapNm1 = [val for val in fdf.ORMapNum.values if val not in exp_gdf.ORMapNum.values]
+            ORMapNm2 = [val for val in exp_gdf.ORMapNum.values if val not in fdf.ORMapNum.values]
+            if (len(ORMapNm1)==1) & (len(ORMapNm2)==1):
+                fdf.loc[fdf.ORMapNum == ORMapNm1[0], 'ORMapNum'] = ORMapNm2[0]
+            if all([val in exp_gdf.ORMapNum.values for val in fdf.ORMapNum.values]):
+                exp_gdf.drop(columns=['wdID'], inplace=True)
+                exp_gdf = fdf.merge(exp_gdf, on='ORMapNum', how='right')
+                exp_gdf.loc[:, 'match'] = 1
+                frames0.append(exp_gdf[colnms])
+            elif (any(bv1)) & (any(bv2)):
+                ORMapNm3 = [val for val in fdf.ORMapNum.values if val not in exp_gdf.ORMapNum.values]
+                ORMapNm4 = [val for val in exp_gdf.ORMapNum.values if val not in fdf.ORMapNum.values]
+                exp_gdf.drop(columns=['wdID'], inplace=True)
+                exp_gdf = fdf[~fdf.ORMapNum.isin(ORMapNm3)].merge(exp_gdf, on='ORMapNum')
+                exp_gdf.loc[:, 'match'] = 2
+                frames0.append(exp_gdf[colnms])
+                frames3.append(fdf[fdf.ORMapNum.isin(ORMapNm3)])
+                frames4.append(exp_gdf[exp_gdf.ORMapNum.isin(ORMapNm4)])
+            else:
+                frames1.append(exp_gdf)
+                frames2.append(fdf)    
+        elif all([val in fdf.ORMapNum.values for val in exp_gdf.ORMapNum.values]):
+            exp_gdf.drop(columns=['wdID'], inplace=True)
+            exp_gdf = fdf.merge(exp_gdf, on='ORMapNum', how='left')
+            exp_gdf.loc[:, 'match'] = 3
+            frames0.append(exp_gdf[colnms])
+            ORMapNm3 = [val for val in fdf.ORMapNum.values if val not in exp_gdf.ORMapNum.values]
+            frames3.append(fdf[fdf.ORMapNum.isin(ORMapNm3)])
+        elif (any(bv1)) & (any(bv2)):
+            ORMapNm3 = [val for val in fdf.ORMapNum.values if val not in exp_gdf.ORMapNum.values]
+            ORMapNm4 = [val for val in exp_gdf.ORMapNum.values if val not in fdf.ORMapNum.values]
+            exp_gdf.drop(columns=['wdID'], inplace=True)
+            exp_gdf = fdf[~fdf.ORMapNum.isin(ORMapNm3)].merge(exp_gdf, on='ORMapNum')
+            exp_gdf.loc[:, 'match'] = 4
+            frames0.append(exp_gdf[colnms])
+            frames3.append(fdf[fdf.ORMapNum.isin(ORMapNm3)])
+            frames4.append(exp_gdf[exp_gdf.ORMapNum.isin(ORMapNm4)])
+        elif exp_gdf.shape[0] == 1:
+            fdf.drop(columns=['ORMapNum'], inplace=True)
+            exp_gdf = fdf.merge(exp_gdf, on='wdID', how='left')
+            exp_gdf.loc[:, 'match'] = 5
+            frames0.append(exp_gdf[colnms])
+        else:
+            frames1.append(exp_gdf)
+            frames2.append(fdf)            
+    sa_df0 = pd.concat(frames0, ignore_index=True)
+    sa_gdf0 = gpd.GeoDataFrame(sa_df0, geometry='geometry')
+    if frames1 != []:
+        sa_df1 = pd.concat(frames1, ignore_index=True)
+        sa_gdf1 = gpd.GeoDataFrame(sa_df1, geometry='geometry')
+    else:
+        sa_gdf1 = []
+    if frames2 != []:
+        sa_df2 = pd.concat(frames2, ignore_index=True)
+    else:
+        sa_df2 = []
+    if frames3 != []:
+        sa_df3 = pd.concat(frames3, ignore_index=True)
+    else:
+        sa_df3 = []
+    if frames4 != []:
+        sa_df4 = pd.concat(frames4, ignore_index=True)
+        sa_gdf4 = gpd.GeoDataFrame(sa_df4, geometry='geometry')
+    else:
+        sa_gdf4 = []
+#     outnm='wd_mapped_data', export=True
+#     if export:
+#         sa_gdf=sa_gdf.rename(columns=coldict)
+#         try:
+#             sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
+#         except RuntimeError:
+#             sa_gdf['geometry'] = sa_gdf.geometry.buffer(0)
+#             sa_gdf.to_file(os.path.join(inpath, "output", "final", f"{outnm}.shp"), index=False)
+    return sa_gdf0, sa_gdf1, sa_df2, sa_df3, sa_gdf4
  
 ################################################ Report #########################################################
 
@@ -1879,8 +1968,8 @@ def convert_trsqq(x):
     """
     convert township, range, section, and quarter-quarter to the taxlot id format
     """
-    #print(x)
     x1 = '{:<08s}'.format(x)
+    #print(x, x1)
     #x = re.sub("V|X|Y|Z", "", x)
     xt = get_tr_code(x1, code='t') + get_tr_code(x1, code='r') + get_s_code(x) + get_qq_code(x1)
     return xt[:16]
@@ -1889,7 +1978,7 @@ def create_ORTaxlot(cnt_code, trsqq, lot):
     """
     create the taxlot id based on the county code, township, range, section, and lot number
     """
-    print(f'County {cnt_code}, TRSQQ {trsqq}, Lot {lot}')
+    #print(f'County {cnt_code}, TRSQQ {trsqq}, Lot {lot}')
     part1 = str(int(cnt_code)).zfill(2) + convert_trsqq(trsqq) 
     taxlotID = part1 + '--' + ('000000000' + lot)[-9:]
     tid_dst_2 = [x[-len(lot):] for x in tid_dst_1]    
@@ -2068,8 +2157,9 @@ def get_record_dict(setID, wd_df):
 def combine_taxlot(exportID=False, 
                    yearstart=2016, 
                    yearend=2023,
-                   skips=[2010, 2013],
-                   all_counties=False):
+                   skips=[],
+                   all_counties=True, 
+                   counties=OR_counties):
     """
     combine taxlots from all years
     """
@@ -2089,7 +2179,7 @@ def combine_taxlot(exportID=False,
                     tx_dt = gpd.read_file(fr'{inpath}\GIS\ORMAP_data\ORMAP_Taxlot_Years\Taxlots{year}.gdb',
                                           layer=county)
                     tx_dt.columns = list(map(lambda x: x.lower(), tx_dt.columns))
-                    if 'Year' not in tx_dt.columns:
+                    if 'year' not in tx_dt.columns:
                         tx_dt['year'] = str(year)
                     tx_dt.rename(columns={'ortaxlot': 'ORTaxlot'}, inplace=True)
                     tx_dt['county'] = county

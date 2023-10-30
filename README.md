@@ -20,24 +20,27 @@ Start with combing tables and scanning the TRSQQ (correct the errors first if ne
 
 2. Run the script `notes_review_set*.ipynb`
 
-This step basically creates the notes to correct the WD records with coordinates. Correct the WD tables after this or next step using the script [`08_correct_WD_records`](https://github.com/dongmeic/EPA-WD/blob/main/08_correct_WD_records.ipynb). It is considered as Tier2 Step2. 
+This step basically creates the notes to correct the WD records with coordinates. Once the errata is collected (saved at 'output\corrected\corrected_Set*.xlsx'), correct the WD tables after this or next step using the script [`08_correct_WD_records`](https://github.com/dongmeic/EPA-WD/blob/main/08_correct_WD_records.ipynb) based on the errata and save an updated copy ('DSL data originals\Corrected_by_Set\Set*.csv'). It is considered as Tier2 Step2. The corrected WD data will be used in the QAQC step.
 
-3. Continue the script `run_and_review_set*`
+3. Continue the script `run_and_review_set*.ipynb`
 
-Run the function `run_Tier2_step3` to get the additional matches. 
+Run the function `run_Tier2_step3` to get the additional matches. Skip this step if the step `run_Tier2_step1` is skipped.
 
-4. Run the script `digitize_set*_loop`
+4. QAQC 
 
+
+
+6. Run the script `digitize_set*_loop`
 
 First, review the matched records without notes on the parcel ids such as partial taxlots and roads using the function `review_loop_r1` to identify the QAQC records. Then update the [application](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) with the QAQC records, matched records without notes, unmatched records, and issue IDs. The data can be updated by replacing the [feature layer](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544). The next step is digitizing the unmatched or partially-matched records. It is considered as Tier 3 and 4 with feedback on errata and issue IDs for DSL. 
 
 When start digitizing, create a file geodatabase 'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\GIS\ArcGIS Pro Project\DataReview\Set*.gdb' and two feature classes 'Set*_wo_lot' and 'Set*_partial'. The notes 'Set*_edited.txt' and 'Set*_edited_1.txt' in the folder 'L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\output\matched' are created to document the edited taxlots in the shapefile 'matched_records_Set*_edited.shp' or edited taxlots in the file geodatabase. 
 
-5. Run the script [`04_combine_matched_digitized`](https://github.com/dongmeic/EPA-WD/blob/main/04_combine_matched_digitized.ipynb)
+7. Run the script [`04_combine_matched_digitized`](https://github.com/dongmeic/EPA-WD/blob/main/04_combine_matched_digitized.ipynb)
 
 This step applies `run_Tier3_4_final` and export the first version of final WD SA data.
 
-6. Run the script [`09_add_issue_IDs_to_set`](https://github.com/dongmeic/EPA-WD/blob/012078acc20779062fbe918a5974ba3c11775ceb/09_add_issue_IDs_to_set.ipynb)
+8. Run the script [`09_add_issue_IDs_to_set`](https://github.com/dongmeic/EPA-WD/blob/012078acc20779062fbe918a5974ba3c11775ceb/09_add_issue_IDs_to_set.ipynb)
 
 This step finalizes the WD SA data with issue IDs. 
 
