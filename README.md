@@ -50,6 +50,10 @@ This step applies `run_Tier3_4_final` and export the first version of final WD S
 
 This step finalizes the WD SA data with issue IDs. 
 
+9. Update the application data using `update_QAQC_data_on_the_application.ipynb`[https://github.com/dongmeic/EPA-WD/blob/main/update_QAQC_data_on_the_application.ipynb]
+
+The original table was prepared using the script [organize_data_for_QAQC_reporting.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/organize_data_for_QAQC_reporting.ipynb) and updated using the script [update_QAQC_data_on_the_application.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/update_QAQC_data_on_the_application.ipynb). Basically, we need to update the feature layer "[Wetland Delineation and Determination Counts](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544)" (source data - L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\reporting\WD_Counts.zip). The function `update_QAQC_data` is created to update the source data for the feature layer. The [web map](https://lcog.maps.arcgis.com/apps/mapviewer/index.html?webmap=c3bffa7cd230464db051ec263b5e4517) and [application](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) are both automatically updated when the feature layer is updated.
+
 ### Steps on the functions
 #### Tier 1 - initial match with raw data
 
@@ -92,7 +96,7 @@ Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb
 7. Update QAQC counts by excluding the completed records.
 
 #### Report
-The script `initial_status_report.ipynb` was initially applied to report the progress. The reoprt step is later explained in the section [Update the QAQC progress by county and year](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06) in this document. 
+The script `initial_status_report.ipynb` was initially applied to report the progress. 
 
 ## Notes
 
@@ -107,7 +111,3 @@ DSL requested data attritutes and test data for their database development tests
 ### Study area polygons
 
 Run `join_WD_with_SA_by_taxmap` in `10_review_data_from_all_sets` to get the deliverable.
-
-## [Update the QAQC progress by county and year](https://lcog.maps.arcgis.com/apps/instant/charts/index.html?appid=69fe51df1ce544e980e27e5a5a89dd06)
-
-The original table was prepared using the script [organize_data_for_QAQC_reporting.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/organize_data_for_QAQC_reporting.ipynb) and updated using the script [update_QAQC_data_on_the_application.ipynb](https://github.com/dongmeic/EPA-WD/blob/main/update_QAQC_data_on_the_application.ipynb). Basically, we need to update the data "[Wetland Delineation and Determination Counts](https://lcog.maps.arcgis.com/home/item.html?id=2a9bcd28a8e34516b9f91f312864d544)" (L:\NaturalResources\Wetlands\Local Wetland Inventory\WAPO\EPA_2022_Tasks\Task 1 WD Mapping\reporting\WD_Counts.zip).
