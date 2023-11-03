@@ -821,7 +821,7 @@ def flatten(l):
     """
     return [item for sublist in l for item in sublist]
 
-def count_lst_ele(dct, lst, ctnm):
+def count_lst_ele(dct, lst, colnm, ctnm):
     """
     count list elements
     ctnm - count number
@@ -829,7 +829,7 @@ def count_lst_ele(dct, lst, ctnm):
     qaqc_cnt = [*map(dct.get, lst)]
     freq = Counter(qaqc_cnt)
     df = pd.DataFrame(sorted(freq.items()))
-    df.columns = ['county', ctnm]
+    df.columns = [colnm, ctnm]
     return df
 
 def read_list(setid):
