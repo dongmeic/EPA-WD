@@ -104,17 +104,20 @@ pd.options.mode.chained_assignment = None
 ############################################### QAQC updates ###################################################
 
 def update_QAQC_data(setID, wd, totcol, qaqc_col, export=True):
-#     file = outpath + f'\\to_review\\re_mapping_{setID}.txt'
-#     with open(file) as f:
-#         remapIDs = f.readlines()
-#     partialIDs = list(wd[~wd.notes.isnull()].wetdet_delin_number.unique())
-#     unmatched = pd.read_csv(outpath+f'\\to_review\\unmatched_df_{setID}_2.csv')
-#     unmatchedIDs = list(unmatched.wetdet_delin_number.unique()) 
-#     issues = pd.read_excel(outpath + f'\\to_review\\{setID}_Mapping_Issues.xlsx')
-#     issueIDs = list(issues.wetdet_delin_number.unique())
-#     qaqcIDs = remapIDs[0].split(', ') + partialIDs + unmatchedIDs + issueIDs
-    mapped = gpd.read_file(f'{outpath}//final//mapped_wd_{setID}.shp')
-    qaqcIDs = wd[~wd.wetdet_delin_number.isin(mapped.wdID.unique())].wetdet_delin_number.unique()
+    gdf_file = f'{outpath}//final//mapped_wd_{setID}.shp'
+    if os.path.isfile(gdf_file):
+        mapped = gpd.read_file(gdf_file)
+        qaqcIDs = wd[~wd.wetdet_delin_number.isin(mapped.wdID.unique())].wetdet_delin_number.unique()
+    else:
+        file = outpath + f'\\to_review\\re_mapping_{setID}.txt'
+        with open(file) as f:
+            remapIDs = f.readlines()
+        partialIDs = list(wd[~wd.notes.isnull()].wetdet_delin_number.unique())
+        unmatched = pd.read_csv(outpath+f'\\to_review\\unmatched_df_{setID}_2.csv')
+        unmatchedIDs = list(unmatched.wetdet_delin_number.unique()) 
+        issues = pd.read_excel(outpath + f'\\to_review\\{setID}_Mapping_Issues.xlsx')
+        issueIDs = list(issues.wetdet_delin_number.unique())
+        qaqcIDs = unique(remapIDs[0].split(', ') + partialIDs + unmatchedIDs + issueIDs) 
     # count QAQC 
     qaqc_df = wd[wd.wetdet_delin_number.isin(qaqcIDs)][['county', 'wetdet_delin_number']].groupby(['county']).agg(lambda x: x.nunique()).reset_index().rename(columns={'wetdet_delin_number':'QAQC_count'})
     # total count
@@ -638,17 +641,17 @@ def create_ORMapNm(ct_nm, trsqq):
                     mpidx = mid     
     return mpidx
     
-def get_all_wd(num, raw=False):
+def get_all_wd(sets, raw=False):
     """
-    combine all the original DSL tables into one dataframe
+    combine all the original DSL tables into one dataframe by set
     """    
     frames = []
-    for i in range(num):
+    for i in sets:
         if raw:
-            wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i], raw=True)
+            wd_dt = combine_wd_tables(setID='Set00'+str(i), nm_to_add=nm2add[i-1], raw=True)
         else:
-            wd_dt = combine_wd_tables(setID='Set00'+str(i+1), nm_to_add=nm2add[i], raw=False)
-        wd_dt['SetID'] = i+1
+            wd_dt = combine_wd_tables(setID='Set00'+str(i), nm_to_add=nm2add[i-1], raw=False)
+        wd_dt['SetID'] = i
         frames.append(wd_dt)
     wd_df = pd.concat(frames, ignore_index=True)
     return wd_df
@@ -1472,7 +1475,7 @@ def generate_taxlot_output(df, taxlot, setID, ml, export=False):
     taxlots_to_review = taxlot[taxlot[['year', 'ORTaxlot']].apply(tuple, axis=1).isin(df.pairs.values)]
     taxlots_to_review_2 = taxlots_to_review.merge(df, on='ORTaxlot')
     taxlots_to_review_2.drop(columns=['pairs'], inplace=True)
-    if export:
+    if export and not taxlots_to_review_2.empty:
         taxlots_to_review_2.to_file(os.path.join(inpath + '\\output\\to_review\\', f'review_unmatched_{setID}_r2_{ml}.shp'))
     return taxlots_to_review_2
 
@@ -1683,7 +1686,8 @@ def get_taxlot_to_check_r2(revdf, taxlot, setID, ml):
     taxlots_to_review_2.rename(columns={'wetdet_delin_number': 'wdID', 
                       'DecisionLink':'doc_link',
                       'correct_type':'cor_type'}, inplace=True)
-    taxlots_to_review_2.to_file(os.path.join(inpath, 'output', 'to_review', f'review_unmatched_{setID}_r2_{ml}.shp'))
+    if not taxlots_to_review_2.empty:
+        taxlots_to_review_2.to_file(os.path.join(inpath, 'output', 'to_review', f'review_unmatched_{setID}_r2_{ml}.shp'))
     return taxlots_to_review_2
 
 def adjust_taxlot(tx, ty):
@@ -2108,6 +2112,7 @@ def combine_wd_tables(setID, nm_to_add, raw=True):
         wd_df.loc[selectedID, 'missinglot'] = wd_df[selectedID].parcel_id.apply(lambda x: without_lots(x))
     else:
         wd_df = pd.read_csv(wdpath+f'\\Corrected_by_Set\\{setID}.csv')
+    wd_df.loc[:, 'county'] = wd_df.county.apply(lambda x: x.capitalize())
     
     return wd_df
 
@@ -2166,7 +2171,7 @@ def combine_taxlot(exportID=False,
     frames = []
     for year in range(yearstart, yearend):
         if year not in skips:
-            print(year)
+            #print(year)
             if all_counties:
                 tx_dt = read_taxlot(year)
                 if 'Year' not in tx_dt.columns:
@@ -2230,7 +2235,8 @@ def match_wd_data_with_taxlot(df, setID, all_taxlot, export=False, update=False)
     make sure the matched_records_{setID}.shp is not the updated version from a previous run when update is true
     """
     tocheck_txid = df.ORTaxlot.unique()
-    found = [txid for txid in tocheck_txid if txid in all_txid]
+    found = [txid for txid in tocheck_txid if txid in all_taxlot.ORTaxlot.unique()]
+    #found = [txid for txid in tocheck_txid if txid in all_txid]
     # unfound = [txid for txid in tocheck_txid if txid not in all_txid]
     # if len(unfound) > 0:
     #     sdf = df[df.ORTaxlot.isin(unfound)]
@@ -2574,6 +2580,7 @@ def run_Tier1(setID, nm_to_add, all_taxlot):
     initial match
     """
     wd = combine_wd_tables(setID, nm_to_add)
+    wd.loc[:, 'county'] = wd.county.apply(lambda x: x.capitalize())
     setdf = reindex_data(wd)
     # this might take a while
     start = time.time()
