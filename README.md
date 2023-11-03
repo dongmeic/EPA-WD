@@ -96,7 +96,7 @@ Digitize the unmatched and partially matched records - `digitize_setX_loop.ipynb
 7. Update QAQC counts by excluding the completed records.
 
 #### Report
-The script `initial_status_report.ipynb` was initially applied to report the progress. The current reporting format is the application explained above.
+The script `status_report.ipynb` was initially applied to report the progress. The current reporting format is the application explained above.
 
 ## Notes
 
